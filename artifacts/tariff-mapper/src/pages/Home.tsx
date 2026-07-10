@@ -226,6 +226,16 @@ function SearchResults({ result }: { result: TariffSearchResult }) {
         </div>
       </div>
 
+      {result.manualReviewRequired && result.missing_attributes.length > 0 && (
+        <div className="flex items-start gap-2 px-4 py-3 bg-amber-500/5 border border-amber-500/20 rounded-lg text-sm">
+          <Info className="w-4 h-4 mt-0.5 text-amber-600 dark:text-amber-400 shrink-0" />
+          <div>
+            <span className="font-semibold text-foreground">To improve this match, provide:</span>{' '}
+            <span className="text-muted-foreground">{result.missing_attributes.join(', ')}</span>
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-4">
         {result.matches.map((match: any, idx: number) => (
           <ResultCard key={`${match.code}-${idx}`} match={match} rank={idx + 1} />
@@ -237,7 +247,7 @@ function SearchResults({ result }: { result: TariffSearchResult }) {
 
 function ResultCard({ match, rank }: { match: TariffSearchResult['matches'][0], rank: number }) {
   // Determine styling based on match label and confidence
-  const isHighConfidence = match.confidence >= 0.8;
+  const isHighConfidence = match.match_confidence >= 0.8;
   const isReviewRequired = match.matchLabel === 'manual_review_required';
   
   const getBadgeColor = (label: string) => {
@@ -277,10 +287,10 @@ function ResultCard({ match, rank }: { match: TariffSearchResult['matches'][0], 
 
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-xs font-medium">
-            <span className="text-muted-foreground">Confidence</span>
+            <span className="text-muted-foreground">Match Confidence</span>
             <span className={cn(
               isHighConfidence ? "text-emerald-600 dark:text-emerald-400 font-bold" : "text-foreground font-semibold"
-            )}>{(match.confidence * 100).toFixed(1)}%</span>
+            )}>{(match.match_confidence * 100).toFixed(1)}%</span>
           </div>
           <div className="w-full bg-border rounded-full h-1.5 overflow-hidden">
             <div 
@@ -288,13 +298,18 @@ function ResultCard({ match, rank }: { match: TariffSearchResult['matches'][0], 
                 "h-full rounded-full",
                 isHighConfidence ? "bg-emerald-500" : isReviewRequired ? "bg-amber-500" : "bg-primary"
               )}
-              style={{ width: `${match.confidence * 100}%` }}
+              style={{ width: `${match.match_confidence * 100}%` }}
             />
           </div>
-          <div className="pt-2">
+          <div className="pt-2 flex flex-wrap gap-1">
             <Badge variant="outline" className={cn("text-[10px] uppercase font-bold tracking-wider", getBadgeColor(match.matchLabel))}>
               {formatLabel(match.matchLabel)}
             </Badge>
+            {!match.verified && (
+              <Badge variant="outline" className="text-[10px] uppercase font-bold tracking-wider bg-muted text-muted-foreground border-border">
+                Unverified source
+              </Badge>
+            )}
           </div>
         </div>
       </div>
@@ -312,7 +327,7 @@ function ResultCard({ match, rank }: { match: TariffSearchResult['matches'][0], 
           {match.tariffRate && (
             <div className="bg-background border rounded p-3">
               <div className="text-[10px] uppercase font-bold text-muted-foreground mb-1 tracking-wider">Statutory Rate</div>
-              <div className="font-semibold">{match.tariffRate}</div>
+              <div className={cn("font-semibold", !match.verified && "text-muted-foreground italic text-sm")}>{match.tariffRate}</div>
             </div>
           )}
           {match.tariffNote && (
@@ -321,6 +336,20 @@ function ResultCard({ match, rank }: { match: TariffSearchResult['matches'][0], 
               <div className="font-medium text-sm text-foreground/90 line-clamp-2" title={match.tariffNote}>{match.tariffNote}</div>
             </div>
           )}
+        </div>
+
+        <div className="grid grid-cols-4 gap-2 mb-4">
+          {([
+            ['HS anchor', match.reasoning.hs_anchor_strength],
+            ['Description', match.reasoning.description_similarity],
+            ['Nat. extension', match.reasoning.national_extension_evidence],
+            ['Source', match.reasoning.source_completeness],
+          ] as const).map(([label, value]) => (
+            <div key={label} className="bg-background border rounded p-2 text-center">
+              <div className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider mb-0.5">{label}</div>
+              <div className="text-sm font-semibold">{(value * 100).toFixed(0)}%</div>
+            </div>
+          ))}
         </div>
 
         <div className="mt-auto pt-4 border-t border-dashed">

@@ -97,6 +97,7 @@ components:
         - tariffRate
         - tariffNote
         - source
+        - verified
       properties:
         code:
           type: string
@@ -110,12 +111,18 @@ components:
           type: string
         tariffRate:
           type: ["string", "null"]
-          description: Representative tariff rate or indicator, where available.
+          description: >
+            Representative tariff rate, or "Not available in current source
+            data" when the row is not yet verified. Never a placeholder
+            numeric rate.
         tariffNote:
           type: ["string", "null"]
         source:
           type: string
           description: Reference/citation for this entry.
+        verified:
+          type: boolean
+          description: True when this row has a hand-curated, checkable rate; false for auto-imported placeholder rows pending verification.
     TariffSearchInput:
       type: object
       required:
@@ -146,18 +153,49 @@ components:
             - exact_code_lookup
         detail:
           type: string
+    MatchReasoning:
+      type: object
+      description: >
+        Transparent breakdown of the weighted confidence formula: 0.45 *
+        hs_anchor_strength + 0.35 * description_similarity + 0.10 *
+        national_extension_evidence + 0.10 * source_completeness. Every
+        component is 0-1.
+      required:
+        - hs_anchor_strength
+        - description_similarity
+        - national_extension_evidence
+        - source_completeness
+      properties:
+        hs_anchor_strength:
+          type: number
+          minimum: 0
+          maximum: 1
+        description_similarity:
+          type: number
+          minimum: 0
+          maximum: 1
+        national_extension_evidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        source_completeness:
+          type: number
+          minimum: 0
+          maximum: 1
     TariffMatch:
       type: object
       required:
         - code
         - country
         - description
-        - confidence
+        - match_confidence
         - matchLabel
         - explanation
+        - reasoning
         - tariffRate
         - tariffNote
         - source
+        - verified
       properties:
         code:
           type: string
@@ -165,20 +203,30 @@ components:
           $ref: "#/components/schemas/Country"
         description:
           type: string
-        confidence:
+        match_confidence:
           type: number
           minimum: 0
           maximum: 1
+          description: >
+            Heuristic 0-1 score composed of the reasoning components below.
+            Not an empirically calibrated probability.
         matchLabel:
           $ref: "#/components/schemas/MatchLabel"
         explanation:
           $ref: "#/components/schemas/MatchExplanation"
+        reasoning:
+          $ref: "#/components/schemas/MatchReasoning"
         tariffRate:
           type: ["string", "null"]
+          description: >
+            Representative tariff rate, or "Not available in current source
+            data" when unverified. Never a placeholder numeric rate.
         tariffNote:
           type: ["string", "null"]
         source:
           type: string
+        verified:
+          type: boolean
     TariffSearchResult:
       type: object
       required:
@@ -187,6 +235,7 @@ components:
         - direction
         - anchorHsCode
         - manualReviewRequired
+        - missing_attributes
         - matches
       properties:
         query:
@@ -202,6 +251,14 @@ components:
         manualReviewRequired:
           type: boolean
           description: True when no confident match exists and a human should review.
+        missing_attributes:
+          type: array
+          items:
+            type: string
+          description: >
+            Product attributes the user could supply (e.g. material,
+            intended use, technical specification) to sharpen an ambiguous
+            or low-confidence result.
         matches:
           type: array
           maxItems: 5

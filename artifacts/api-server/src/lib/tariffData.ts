@@ -40,7 +40,17 @@ export interface TariffCodeEntry {
   tariffRate: string | null;
   tariffNote: string | null;
   source: string;
+  /**
+   * True for hand-curated national tariff lines with a real rate and a
+   * checkable citation (`TARIFF_ANCHORS`). False for auto-generated
+   * placeholder rows created from the full HS6 nomenclature import, which
+   * have no verified rate yet. The matcher and confidence engine must treat
+   * unverified rows as "not available" data, never as a real numeric rate.
+   */
+  verified: boolean;
 }
+
+export const NOT_AVAILABLE_RATE = "Not available in current source data";
 
 const CHINA_SOURCE =
   "China Customs Import and Export Tariff (illustrative excerpt, general trade)";
@@ -56,8 +66,8 @@ const INDONESIA_SOURCE =
 export const TARIFF_ANCHORS: {
   hsAnchor: string;
   baseDescription: string;
-  china: Array<Omit<TariffCodeEntry, "country" | "hsAnchor" | "source">>;
-  indonesia: Array<Omit<TariffCodeEntry, "country" | "hsAnchor" | "source">>;
+  china: Array<Omit<TariffCodeEntry, "country" | "hsAnchor" | "source" | "verified">>;
+  indonesia: Array<Omit<TariffCodeEntry, "country" | "hsAnchor" | "source" | "verified">>;
 }[] = [
   {
     hsAnchor: "851712",
@@ -1167,20 +1177,22 @@ function buildPlaceholderEntries(
       country: "china",
       hsAnchor,
       description,
-      tariffRate: null,
+      tariffRate: NOT_AVAILABLE_RATE,
       tariffNote: PENDING_RATE_NOTE,
       source:
         "WCO HS nomenclature (anchor only, via UN Comtrade classification reference)",
+      verified: false,
     });
     entries.push({
       code: `${hsAnchor.slice(0, 4)}.${hsAnchor.slice(4, 6)}.00`,
       country: "indonesia",
       hsAnchor,
       description,
-      tariffRate: null,
+      tariffRate: NOT_AVAILABLE_RATE,
       tariffNote: PENDING_RATE_NOTE,
       source:
         "WCO HS nomenclature (anchor only, via UN Comtrade classification reference)",
+      verified: false,
     });
   }
   return entries;
@@ -1197,6 +1209,7 @@ function buildEntries(): TariffCodeEntry[] {
         country: "china",
         hsAnchor: anchor.hsAnchor,
         source: CHINA_SOURCE,
+        verified: true,
       });
     }
     for (const id of anchor.indonesia) {
@@ -1205,6 +1218,7 @@ function buildEntries(): TariffCodeEntry[] {
         country: "indonesia",
         hsAnchor: anchor.hsAnchor,
         source: INDONESIA_SOURCE,
+        verified: true,
       });
     }
   }

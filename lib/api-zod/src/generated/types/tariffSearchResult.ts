@@ -20,6 +20,8 @@ export interface TariffSearchResult {
   anchorHsCode: string | null;
   /** True when no confident match exists and a human should review. */
   manualReviewRequired: boolean;
+  /** Product attributes the user could supply (e.g. material, intended use, technical specification) to sharpen an ambiguous or low-confidence result. */
+  missing_attributes: string[];
   /** @maxItems 5 */
   matches: TariffMatch[];
 }

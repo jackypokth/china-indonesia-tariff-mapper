@@ -1,1 +1,2 @@
 - [Tariff dataset layering](tariff-dataset-layering.md) — full HS6 nomenclature is imported as a base layer; curated national rates overlay it and always take precedence.
+- [Tariff confidence engine](tariff-confidence-engine.md) — match_confidence is a weighted, reasoning-transparent score; exact_match requires a verified single target + high description similarity, never just a clean code lookup.

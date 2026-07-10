@@ -12,6 +12,7 @@ export * from './listTariffCodesParams';
 export * from './matchExplanation';
 export * from './matchExplanationBasis';
 export * from './matchLabel';
+export * from './matchReasoning';
 export * from './queryType';
 export * from './tariffCode';
 export * from './tariffMatch';

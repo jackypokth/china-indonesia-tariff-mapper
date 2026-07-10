@@ -18,7 +18,7 @@ export interface TariffCode {
   hsAnchor: string;
   description: string;
   /**
-     * Representative tariff rate or indicator, where available.
+     * Representative tariff rate, or "Not available in current source data" when the row is not yet verified. Never a placeholder numeric rate.
      * @nullable
      */
   tariffRate: string | null;
@@ -26,4 +26,6 @@ export interface TariffCode {
   tariffNote: string | null;
   /** Reference/citation for this entry. */
   source: string;
+  /** True when this row has a hand-curated, checkable rate; false for auto-imported placeholder rows pending verification. */
+  verified: boolean;
 }

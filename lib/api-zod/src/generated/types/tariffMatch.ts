@@ -8,21 +8,28 @@
 import type { Country } from './country';
 import type { MatchExplanation } from './matchExplanation';
 import type { MatchLabel } from './matchLabel';
+import type { MatchReasoning } from './matchReasoning';
 
 export interface TariffMatch {
   code: string;
   country: Country;
   description: string;
   /**
+     * Heuristic 0-1 score composed of the reasoning components below. Not an empirically calibrated probability.
      * @minimum 0
      * @maximum 1
      */
-  confidence: number;
+  match_confidence: number;
   matchLabel: MatchLabel;
   explanation: MatchExplanation;
-  /** @nullable */
+  reasoning: MatchReasoning;
+  /**
+     * Representative tariff rate, or "Not available in current source data" when unverified. Never a placeholder numeric rate.
+     * @nullable
+     */
   tariffRate: string | null;
   /** @nullable */
   tariffNote: string | null;
   source: string;
+  verified: boolean;
 }

@@ -30,8 +30,20 @@ export const SearchTariffMatchesBody = zod.object({
   "direction": zod.enum(['china_to_indonesia', 'indonesia_to_china'])
 })
 
-export const searchTariffMatchesResponseMatchesItemConfidenceMin = 0;
-export const searchTariffMatchesResponseMatchesItemConfidenceMax = 1;
+export const searchTariffMatchesResponseMatchesItemMatchConfidenceMin = 0;
+export const searchTariffMatchesResponseMatchesItemMatchConfidenceMax = 1;
+
+export const searchTariffMatchesResponseMatchesItemReasoningHsAnchorStrengthMin = 0;
+export const searchTariffMatchesResponseMatchesItemReasoningHsAnchorStrengthMax = 1;
+
+export const searchTariffMatchesResponseMatchesItemReasoningDescriptionSimilarityMin = 0;
+export const searchTariffMatchesResponseMatchesItemReasoningDescriptionSimilarityMax = 1;
+
+export const searchTariffMatchesResponseMatchesItemReasoningNationalExtensionEvidenceMin = 0;
+export const searchTariffMatchesResponseMatchesItemReasoningNationalExtensionEvidenceMax = 1;
+
+export const searchTariffMatchesResponseMatchesItemReasoningSourceCompletenessMin = 0;
+export const searchTariffMatchesResponseMatchesItemReasoningSourceCompletenessMax = 1;
 
 export const searchTariffMatchesResponseMatchesMax = 5;
 
@@ -43,19 +55,27 @@ export const SearchTariffMatchesResponse = zod.object({
   "direction": zod.enum(['china_to_indonesia', 'indonesia_to_china']),
   "anchorHsCode": zod.string().nullable().describe('The nearest HS 6-digit anchor identified for this query, if any.'),
   "manualReviewRequired": zod.boolean().describe('True when no confident match exists and a human should review.'),
+  "missing_attributes": zod.array(zod.string()).describe('Product attributes the user could supply (e.g. material, intended use, technical specification) to sharpen an ambiguous or low-confidence result.\n'),
   "matches": zod.array(zod.object({
   "code": zod.string(),
   "country": zod.enum(['china', 'indonesia']),
   "description": zod.string(),
-  "confidence": zod.number().min(searchTariffMatchesResponseMatchesItemConfidenceMin).max(searchTariffMatchesResponseMatchesItemConfidenceMax),
+  "match_confidence": zod.number().min(searchTariffMatchesResponseMatchesItemMatchConfidenceMin).max(searchTariffMatchesResponseMatchesItemMatchConfidenceMax).describe('Heuristic 0-1 score composed of the reasoning components below. Not an empirically calibrated probability.\n'),
   "matchLabel": zod.enum(['exact_match', 'likely_match', 'partial_match', 'manual_review_required']),
   "explanation": zod.object({
   "basis": zod.enum(['shared_hs_digits', 'semantic_description_similarity', 'tariff_book_structure', 'exact_code_lookup']),
   "detail": zod.string()
 }),
-  "tariffRate": zod.string().nullable(),
+  "reasoning": zod.object({
+  "hs_anchor_strength": zod.number().min(searchTariffMatchesResponseMatchesItemReasoningHsAnchorStrengthMin).max(searchTariffMatchesResponseMatchesItemReasoningHsAnchorStrengthMax),
+  "description_similarity": zod.number().min(searchTariffMatchesResponseMatchesItemReasoningDescriptionSimilarityMin).max(searchTariffMatchesResponseMatchesItemReasoningDescriptionSimilarityMax),
+  "national_extension_evidence": zod.number().min(searchTariffMatchesResponseMatchesItemReasoningNationalExtensionEvidenceMin).max(searchTariffMatchesResponseMatchesItemReasoningNationalExtensionEvidenceMax),
+  "source_completeness": zod.number().min(searchTariffMatchesResponseMatchesItemReasoningSourceCompletenessMin).max(searchTariffMatchesResponseMatchesItemReasoningSourceCompletenessMax)
+}).describe('Transparent breakdown of the weighted confidence formula: 0.45 \* hs_anchor_strength + 0.35 \* description_similarity + 0.10 \* national_extension_evidence + 0.10 \* source_completeness. Every component is 0-1.\n'),
+  "tariffRate": zod.string().nullable().describe('Representative tariff rate, or \"Not available in current source data\" when unverified. Never a placeholder numeric rate.\n'),
   "tariffNote": zod.string().nullable(),
-  "source": zod.string()
+  "source": zod.string(),
+  "verified": zod.boolean()
 })).max(searchTariffMatchesResponseMatchesMax)
 })
 
@@ -73,9 +93,10 @@ export const ListTariffCodesResponseItem = zod.object({
   "country": zod.enum(['china', 'indonesia']),
   "hsAnchor": zod.string().describe('The 6-digit HS anchor this code extends.'),
   "description": zod.string(),
-  "tariffRate": zod.string().nullable().describe('Representative tariff rate or indicator, where available.'),
+  "tariffRate": zod.string().nullable().describe('Representative tariff rate, or \"Not available in current source data\" when the row is not yet verified. Never a placeholder numeric rate.\n'),
   "tariffNote": zod.string().nullable(),
-  "source": zod.string().describe('Reference\/citation for this entry.')
+  "source": zod.string().describe('Reference\/citation for this entry.'),
+  "verified": zod.boolean().describe('True when this row has a hand-curated, checkable rate; false for auto-imported placeholder rows pending verification.')
 }).describe('A single national tariff code entry, illustrative prototype data only.')
 export const ListTariffCodesResponse = zod.array(ListTariffCodesResponseItem)
 

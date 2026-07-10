@@ -47,7 +47,7 @@ export interface TariffCode {
   hsAnchor: string;
   description: string;
   /**
-     * Representative tariff rate or indicator, where available.
+     * Representative tariff rate, or "Not available in current source data" when the row is not yet verified. Never a placeholder numeric rate.
      * @nullable
      */
   tariffRate: string | null;
@@ -55,6 +55,8 @@ export interface TariffCode {
   tariffNote: string | null;
   /** Reference/citation for this entry. */
   source: string;
+  /** True when this row has a hand-curated, checkable rate; false for auto-imported placeholder rows pending verification. */
+  verified: boolean;
 }
 
 export type TariffSearchInputDirection = typeof TariffSearchInputDirection[keyof typeof TariffSearchInputDirection];
@@ -87,22 +89,54 @@ export interface MatchExplanation {
   detail: string;
 }
 
+/**
+ * Transparent breakdown of the weighted confidence formula: 0.45 * hs_anchor_strength + 0.35 * description_similarity + 0.10 * national_extension_evidence + 0.10 * source_completeness. Every component is 0-1.
+ */
+export interface MatchReasoning {
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  hs_anchor_strength: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  description_similarity: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  national_extension_evidence: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  source_completeness: number;
+}
+
 export interface TariffMatch {
   code: string;
   country: Country;
   description: string;
   /**
+     * Heuristic 0-1 score composed of the reasoning components below. Not an empirically calibrated probability.
      * @minimum 0
      * @maximum 1
      */
-  confidence: number;
+  match_confidence: number;
   matchLabel: MatchLabel;
   explanation: MatchExplanation;
-  /** @nullable */
+  reasoning: MatchReasoning;
+  /**
+     * Representative tariff rate, or "Not available in current source data" when unverified. Never a placeholder numeric rate.
+     * @nullable
+     */
   tariffRate: string | null;
   /** @nullable */
   tariffNote: string | null;
   source: string;
+  verified: boolean;
 }
 
 export type TariffSearchResultDirection = typeof TariffSearchResultDirection[keyof typeof TariffSearchResultDirection];
@@ -124,6 +158,8 @@ export interface TariffSearchResult {
   anchorHsCode: string | null;
   /** True when no confident match exists and a human should review. */
   manualReviewRequired: boolean;
+  /** Product attributes the user could supply (e.g. material, intended use, technical specification) to sharpen an ambiguous or low-confidence result. */
+  missing_attributes: string[];
   /** @maxItems 5 */
   matches: TariffMatch[];
 }

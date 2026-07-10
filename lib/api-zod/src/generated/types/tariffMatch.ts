@@ -6,30 +6,37 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { Country } from './country';
-import type { MatchExplanation } from './matchExplanation';
 import type { MatchLabel } from './matchLabel';
 import type { MatchReasoning } from './matchReasoning';
+import type { SourceStatus } from './sourceStatus';
+import type { TariffStatus } from './tariffStatus';
 
 export interface TariffMatch {
-  code: string;
+  matched_code: string;
+  hs6_anchor: string;
   country: Country;
   description: string;
   /**
-     * Heuristic 0-1 score composed of the reasoning components below. Not an empirically calibrated probability.
+     * Heuristic 0-1 score composed ONLY of classification evidence (see MatchReasoning). Not an empirically calibrated probability, and never capped or reduced by tariff-source completeness.
      * @minimum 0
      * @maximum 1
      */
   match_confidence: number;
-  matchLabel: MatchLabel;
-  explanation: MatchExplanation;
+  match_label: MatchLabel;
+  /** True only when classification evidence itself is ambiguous or insufficient (no credible anchor, competing anchors, competing target candidates, or a national extension requiring an absent attribute). Never true merely because a tariff rate is pending or a source row is unverified. */
+  manual_review_required: boolean;
+  /** Product attributes the user could supply (e.g. material, intended use, technical specification) to sharpen this candidate. */
+  missing_attributes: string[];
   reasoning: MatchReasoning;
   /**
-     * Representative tariff rate, or "Not available in current source data" when unverified. Never a placeholder numeric rate.
+     * Real rate string from a verified dataset row, or null when no verified row stores one. Never a placeholder numeric rate.
      * @nullable
      */
-  tariffRate: string | null;
+  tariff_rate: string | null;
   /** @nullable */
-  tariffNote: string | null;
-  source: string;
-  verified: boolean;
+  tariff_note: string | null;
+  tariff_status: TariffStatus;
+  source_status: SourceStatus;
+  /** Citation(s)/reference(s) backing this entry. */
+  source_references: string[];
 }

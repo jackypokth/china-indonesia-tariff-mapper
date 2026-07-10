@@ -7,10 +7,11 @@
  */
 
 /**
- * Transparent breakdown of the weighted confidence formula: 0.45 * hs_anchor_strength + 0.35 * description_similarity + 0.10 * national_extension_evidence + 0.10 * source_completeness. Every component is 0-1.
+ * Transparent breakdown of the weighted, classification-only confidence formula: 0.50 * hs_anchor_strength + 0.30 * description_compatibility + 0.20 * national_extension_specificity. Deliberately excludes any tariff-source verification signal — that is surfaced separately via `tariff_status` / `source_status` on the match.
  */
 export interface MatchReasoning {
   /**
+     * 1.0 for an exact valid code resolving to an HS6 heading, 0.85 for a strong description-to-HS6 match, lower for fuzzy/prefix matches.
      * @minimum 0
      * @maximum 1
      */
@@ -19,15 +20,13 @@ export interface MatchReasoning {
      * @minimum 0
      * @maximum 1
      */
-  description_similarity: number;
+  description_compatibility: number;
   /**
+     * 1.0 only if exactly one target national line is uniquely supported; lower when several national extensions exist.
      * @minimum 0
      * @maximum 1
      */
-  national_extension_evidence: number;
-  /**
-     * @minimum 0
-     * @maximum 1
-     */
-  source_completeness: number;
+  national_extension_specificity: number;
+  /** Human-readable summary generated only from the three components above. */
+  explanation: string;
 }

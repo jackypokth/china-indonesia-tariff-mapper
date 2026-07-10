@@ -238,7 +238,7 @@ function SearchResults({ result }: { result: TariffSearchResult }) {
 
       <div className="grid gap-4">
         {result.matches.map((match: any, idx: number) => (
-          <ResultCard key={`${match.code}-${idx}`} match={match} rank={idx + 1} />
+          <ResultCard key={`${match.matched_code}-${idx}`} match={match} rank={idx + 1} />
         ))}
       </div>
     </div>
@@ -248,7 +248,7 @@ function SearchResults({ result }: { result: TariffSearchResult }) {
 function ResultCard({ match, rank }: { match: TariffSearchResult['matches'][0], rank: number }) {
   // Determine styling based on match label and confidence
   const isHighConfidence = match.match_confidence >= 0.8;
-  const isReviewRequired = match.matchLabel === 'manual_review_required';
+  const isReviewRequired = match.match_label === 'manual_review_required' || match.manual_review_required;
   
   const getBadgeColor = (label: string) => {
     switch (label) {
@@ -282,7 +282,7 @@ function ResultCard({ match, rank }: { match: TariffSearchResult['matches'][0], 
               <span className="capitalize">{match.country}</span>
             </div>
           </div>
-          <div className="font-mono text-2xl font-bold tracking-tight text-foreground">{match.code}</div>
+          <div className="font-mono text-2xl font-bold tracking-tight text-foreground">{match.matched_code}</div>
         </div>
 
         <div className="space-y-1.5">
@@ -302,12 +302,12 @@ function ResultCard({ match, rank }: { match: TariffSearchResult['matches'][0], 
             />
           </div>
           <div className="pt-2 flex flex-wrap gap-1">
-            <Badge variant="outline" className={cn("text-[10px] uppercase font-bold tracking-wider", getBadgeColor(match.matchLabel))}>
-              {formatLabel(match.matchLabel)}
+            <Badge variant="outline" className={cn("text-[10px] uppercase font-bold tracking-wider", getBadgeColor(match.match_label))}>
+              {formatLabel(match.match_label)}
             </Badge>
-            {!match.verified && (
+            {match.source_status !== 'official tariff schedule' && (
               <Badge variant="outline" className="text-[10px] uppercase font-bold tracking-wider bg-muted text-muted-foreground border-border">
-                Unverified source
+                {match.source_status}
               </Badge>
             )}
           </div>
@@ -319,31 +319,35 @@ function ResultCard({ match, rank }: { match: TariffSearchResult['matches'][0], 
         <div className="mb-4">
           <h4 className="font-semibold text-lg leading-snug mb-1">{match.description}</h4>
           <p className="text-xs text-muted-foreground flex items-center gap-1">
-            <Info className="w-3.5 h-3.5" /> Source: {match.source}
+            <Info className="w-3.5 h-3.5" /> Source: {match.source_references.join('; ') || 'n/a'}
           </p>
         </div>
 
         <div className="grid grid-cols-2 gap-4 mb-4">
-          {match.tariffRate && (
+          {match.tariff_rate ? (
             <div className="bg-background border rounded p-3">
               <div className="text-[10px] uppercase font-bold text-muted-foreground mb-1 tracking-wider">Statutory Rate</div>
-              <div className={cn("font-semibold", !match.verified && "text-muted-foreground italic text-sm")}>{match.tariffRate}</div>
+              <div className="font-semibold">{match.tariff_rate}</div>
+            </div>
+          ) : (
+            <div className="bg-background border rounded p-3">
+              <div className="text-[10px] uppercase font-bold text-muted-foreground mb-1 tracking-wider">Statutory Rate</div>
+              <div className="font-medium text-sm text-muted-foreground italic">{match.tariff_status}</div>
             </div>
           )}
-          {match.tariffNote && (
+          {match.tariff_note && (
             <div className="bg-background border rounded p-3">
               <div className="text-[10px] uppercase font-bold text-muted-foreground mb-1 tracking-wider">Note</div>
-              <div className="font-medium text-sm text-foreground/90 line-clamp-2" title={match.tariffNote}>{match.tariffNote}</div>
+              <div className="font-medium text-sm text-foreground/90 line-clamp-2" title={match.tariff_note}>{match.tariff_note}</div>
             </div>
           )}
         </div>
 
-        <div className="grid grid-cols-4 gap-2 mb-4">
+        <div className="grid grid-cols-3 gap-2 mb-4">
           {([
             ['HS anchor', match.reasoning.hs_anchor_strength],
-            ['Description', match.reasoning.description_similarity],
-            ['Nat. extension', match.reasoning.national_extension_evidence],
-            ['Source', match.reasoning.source_completeness],
+            ['Description', match.reasoning.description_compatibility],
+            ['Nat. extension', match.reasoning.national_extension_specificity],
           ] as const).map(([label, value]) => (
             <div key={label} className="bg-background border rounded p-2 text-center">
               <div className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider mb-0.5">{label}</div>
@@ -359,11 +363,17 @@ function ResultCard({ match, rank }: { match: TariffSearchResult['matches'][0], 
             </div>
             <div>
               <div className="text-xs font-bold text-foreground mb-0.5 uppercase tracking-wider">
-                Basis: {formatLabel(match.explanation.basis)}
+                Classification reasoning
               </div>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                {match.explanation.detail}
+                {match.reasoning.explanation}
               </p>
+              {match.missing_attributes.length > 0 && (
+                <p className="text-sm text-muted-foreground mt-1">
+                  <span className="font-semibold text-foreground">To improve this specific match, provide:</span>{' '}
+                  {match.missing_attributes.join(', ')}
+                </p>
+              )}
             </div>
           </div>
         </div>

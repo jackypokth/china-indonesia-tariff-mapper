@@ -138,66 +138,80 @@ components:
         direction:
           type: string
           enum: [china_to_indonesia, indonesia_to_china]
-    MatchExplanation:
-      type: object
-      required:
-        - basis
-        - detail
-      properties:
-        basis:
-          type: string
-          enum:
-            - shared_hs_digits
-            - semantic_description_similarity
-            - tariff_book_structure
-            - exact_code_lookup
-        detail:
-          type: string
+    SourceStatus:
+      type: string
+      description: >
+        Provenance of this entry's classification/tariff data. Kept strictly
+        separate from match_confidence — a classification can be fully
+        certain while its tariff rate is still pending import.
+      enum:
+        - official tariff schedule
+        - public nomenclature source
+        - tariff data pending
+        - source unavailable
+    TariffStatus:
+      type: string
+      description: Whether a real, sourced tariff rate can be displayed for this candidate.
+      enum:
+        - available
+        - not available in current source data
+        - not applicable
     MatchReasoning:
       type: object
       description: >
-        Transparent breakdown of the weighted confidence formula: 0.45 *
-        hs_anchor_strength + 0.35 * description_similarity + 0.10 *
-        national_extension_evidence + 0.10 * source_completeness. Every
-        component is 0-1.
+        Transparent breakdown of the weighted, classification-only confidence
+        formula: 0.50 * hs_anchor_strength + 0.30 * description_compatibility
+        + 0.20 * national_extension_specificity. Deliberately excludes any
+        tariff-source verification signal — that is surfaced separately via
+        `tariff_status` / `source_status` on the match.
       required:
         - hs_anchor_strength
-        - description_similarity
-        - national_extension_evidence
-        - source_completeness
+        - description_compatibility
+        - national_extension_specificity
+        - explanation
       properties:
         hs_anchor_strength:
           type: number
           minimum: 0
           maximum: 1
-        description_similarity:
+          description: >
+            1.0 for an exact valid code resolving to an HS6 heading, 0.85 for
+            a strong description-to-HS6 match, lower for fuzzy/prefix matches.
+        description_compatibility:
           type: number
           minimum: 0
           maximum: 1
-        national_extension_evidence:
+        national_extension_specificity:
           type: number
           minimum: 0
           maximum: 1
-        source_completeness:
-          type: number
-          minimum: 0
-          maximum: 1
+          description: >
+            1.0 only if exactly one target national line is uniquely
+            supported; lower when several national extensions exist.
+        explanation:
+          type: string
+          description: Human-readable summary generated only from the three components above.
     TariffMatch:
       type: object
       required:
-        - code
+        - matched_code
+        - hs6_anchor
         - country
         - description
         - match_confidence
-        - matchLabel
-        - explanation
+        - match_label
+        - manual_review_required
+        - missing_attributes
         - reasoning
-        - tariffRate
-        - tariffNote
-        - source
-        - verified
+        - tariff_rate
+        - tariff_note
+        - tariff_status
+        - source_status
+        - source_references
       properties:
-        code:
+        matched_code:
+          type: string
+        hs6_anchor:
           type: string
         country:
           $ref: "#/components/schemas/Country"
@@ -208,25 +222,44 @@ components:
           minimum: 0
           maximum: 1
           description: >
-            Heuristic 0-1 score composed of the reasoning components below.
-            Not an empirically calibrated probability.
-        matchLabel:
+            Heuristic 0-1 score composed ONLY of classification evidence (see
+            MatchReasoning). Not an empirically calibrated probability, and
+            never capped or reduced by tariff-source completeness.
+        match_label:
           $ref: "#/components/schemas/MatchLabel"
-        explanation:
-          $ref: "#/components/schemas/MatchExplanation"
+        manual_review_required:
+          type: boolean
+          description: >
+            True only when classification evidence itself is ambiguous or
+            insufficient (no credible anchor, competing anchors, competing
+            target candidates, or a national extension requiring an absent
+            attribute). Never true merely because a tariff rate is pending or
+            a source row is unverified.
+        missing_attributes:
+          type: array
+          items:
+            type: string
+          description: >
+            Product attributes the user could supply (e.g. material,
+            intended use, technical specification) to sharpen this candidate.
         reasoning:
           $ref: "#/components/schemas/MatchReasoning"
-        tariffRate:
+        tariff_rate:
           type: ["string", "null"]
           description: >
-            Representative tariff rate, or "Not available in current source
-            data" when unverified. Never a placeholder numeric rate.
-        tariffNote:
+            Real rate string from a verified dataset row, or null when no
+            verified row stores one. Never a placeholder numeric rate.
+        tariff_note:
           type: ["string", "null"]
-        source:
-          type: string
-        verified:
-          type: boolean
+        tariff_status:
+          $ref: "#/components/schemas/TariffStatus"
+        source_status:
+          $ref: "#/components/schemas/SourceStatus"
+        source_references:
+          type: array
+          items:
+            type: string
+          description: Citation(s)/reference(s) backing this entry.
     TariffSearchResult:
       type: object
       required:
@@ -250,15 +283,15 @@ components:
           description: The nearest HS 6-digit anchor identified for this query, if any.
         manualReviewRequired:
           type: boolean
-          description: True when no confident match exists and a human should review.
+          description: >
+            Aggregate convenience flag: true when no candidates could be
+            classified at all, or every candidate individually requires
+            manual review. Prefer each match's own `manual_review_required`.
         missing_attributes:
           type: array
           items:
             type: string
-          description: >
-            Product attributes the user could supply (e.g. material,
-            intended use, technical specification) to sharpen an ambiguous
-            or low-confidence result.
+          description: Union of every candidate's missing_attributes, for a single top-of-page hint.
         matches:
           type: array
           maxItems: 5

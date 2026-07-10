@@ -1,6 +1,5 @@
 import {
   TARIFF_CODE_ENTRIES,
-  NOT_AVAILABLE_RATE,
   type Country,
   type TariffCodeEntry,
 } from "./tariffData";
@@ -12,47 +11,55 @@ export type MatchLabel =
   | "likely_match"
   | "partial_match"
   | "manual_review_required";
-export type MatchBasis =
-  | "shared_hs_digits"
-  | "semantic_description_similarity"
-  | "tariff_book_structure"
-  | "exact_code_lookup";
-
-export interface MatchExplanation {
-  basis: MatchBasis;
-  detail: string;
-}
+export type SourceStatus =
+  | "official tariff schedule"
+  | "public nomenclature source"
+  | "tariff data pending"
+  | "source unavailable";
+export type TariffStatus = "available" | "not available in current source data" | "not applicable";
 
 /**
- * Transparent breakdown of the weighted confidence formula:
+ * Transparent breakdown of the classification-only confidence formula:
  *   match_confidence =
- *     0.45 * hs_anchor_strength +
- *     0.35 * description_similarity +
- *     0.10 * national_extension_evidence +
- *     0.10 * source_completeness
- * Every component is 0-1 and independently inspectable — nothing about the
- * final score is hidden in a fixed lookup table.
+ *     0.50 * hs_anchor_strength +
+ *     0.30 * description_compatibility +
+ *     0.20 * national_extension_specificity
+ * This is computed EXCLUSIVELY from classification evidence. It must never be
+ * blended with, or capped by, tariff-source verification/completeness — a
+ * classification can be 100% certain while the tariff rate itself is still
+ * pending import, and the two facts are surfaced through separate fields
+ * (`tariff_status` / `source_status`) instead of dragging confidence down.
  */
 export interface MatchReasoning {
   hs_anchor_strength: number;
-  description_similarity: number;
-  national_extension_evidence: number;
-  source_completeness: number;
+  description_compatibility: number;
+  national_extension_specificity: number;
+  /** Human-readable explanation generated only from the three components above. */
+  explanation: string;
 }
 
 export interface TariffMatch {
-  code: string;
+  matched_code: string;
+  hs6_anchor: string;
   country: Country;
   description: string;
-  /** Heuristic 0-1 score, NOT an empirically calibrated probability. */
+  /** Heuristic 0-1 score, NOT an empirically calibrated probability, and NOT
+   * influenced by tariff-source completeness. */
   match_confidence: number;
-  matchLabel: MatchLabel;
-  explanation: MatchExplanation;
+  match_label: MatchLabel;
+  /** True only when classification evidence itself is ambiguous/insufficient —
+   * never true merely because a tariff rate hasn't been imported yet. */
+  manual_review_required: boolean;
+  /** Product attributes that would help disambiguate this specific candidate. */
+  missing_attributes: string[];
   reasoning: MatchReasoning;
-  tariffRate: string | null;
-  tariffNote: string | null;
-  source: string;
-  verified: boolean;
+  /** Real rate string, or null when no verified dataset row stores one. Never
+   * a placeholder number. */
+  tariff_rate: string | null;
+  tariff_note: string | null;
+  tariff_status: TariffStatus;
+  source_status: SourceStatus;
+  source_references: string[];
 }
 
 export interface TariffSearchResult {
@@ -60,7 +67,11 @@ export interface TariffSearchResult {
   queryType: QueryType;
   direction: Direction;
   anchorHsCode: string | null;
+  /** Aggregate convenience flag: true when no candidates could be classified
+   * at all, or every candidate individually requires manual review. Prefer
+   * each match's own `manual_review_required` for per-candidate decisions. */
   manualReviewRequired: boolean;
+  /** Union of every candidate's `missing_attributes`, for a single top-of-page hint. */
   missing_attributes: string[];
   matches: TariffMatch[];
 }
@@ -147,20 +158,24 @@ function clamp01(n: number): number {
 
 interface AnchorResolution {
   anchor: string | null;
-  basis: MatchBasis;
-  detail: string;
-  /** 0-1: how strongly the source query pins down this HS6 anchor. */
-  hsAnchorStrength: number;
   /** Text to use as the "source side" description for similarity scoring
    * against target candidates — the source entry's own description when the
    * query resolved via a code lookup, otherwise the raw query text. */
   comparisonText: string;
-  /** True when the query is exact-code-verified against a real entry — a
-   * precondition for exact_match eligibility. */
-  exactVerifiedSourceLookup: boolean;
+  /** 0-1: how strongly the source query pins down this HS6 anchor, per the
+   * fixed tiers in the spec (1.0 exact code, 0.85 strong description match,
+   * lower for fuzzy/prefix). */
+  hsAnchorStrength: number;
+  /** True only when the query resolved via an EXACT, non-fuzzy code lookup to
+   * a real classification entry — this is about classification certainty,
+   * never about whether that entry's tariff rate has been verified. */
+  sourceResolutionVerified: boolean;
   /** True when a second, meaningfully different anchor is nearly as
    * plausible as the chosen one — an ambiguous-classification signal. */
   multiplePlausibleAnchors: boolean;
+  /** True when the input code/text could not be resolved to any known
+   * classification at all (invalid/not-found code). */
+  invalidOrNotFound: boolean;
 }
 
 /**
@@ -181,16 +196,22 @@ function identifyAnchor(
       if (knownEntry) {
         return {
           anchor,
-          basis: "exact_code_lookup",
-          detail: `Interpreted "${query}" as HS heading ${anchor} (first 6 digits).`,
-          hsAnchorStrength: 1,
           comparisonText: knownEntry.description,
-          exactVerifiedSourceLookup: knownEntry.verified,
+          hsAnchorStrength: 1,
+          sourceResolutionVerified: true,
           multiplePlausibleAnchors: false,
+          invalidOrNotFound: false,
         };
       }
     }
-    // fall through to description-style fuzzy match on the raw digits/text
+    return {
+      anchor: null,
+      comparisonText: query,
+      hsAnchorStrength: 0,
+      sourceResolutionVerified: false,
+      multiplePlausibleAnchors: false,
+      invalidOrNotFound: true,
+    };
   }
 
   if (queryType === "local_code") {
@@ -202,15 +223,15 @@ function identifyAnchor(
     if (exact) {
       return {
         anchor: exact.hsAnchor,
-        basis: "exact_code_lookup",
-        detail: `Matched "${query}" exactly to national code ${exact.code} (${sourceCountry}), anchored at HS ${exact.hsAnchor}.`,
-        hsAnchorStrength: 1,
         comparisonText: exact.description,
-        exactVerifiedSourceLookup: exact.verified,
+        hsAnchorStrength: 1,
+        sourceResolutionVerified: true,
         multiplePlausibleAnchors: false,
+        invalidOrNotFound: false,
       };
     }
-    // Try prefix match against source country national codes
+    // Try prefix match against source country national codes — a genuine
+    // fuzzy/partial match, so it earns a reduced anchor strength, never 1.0.
     let bestPrefix: TariffCodeEntry | null = null;
     let bestPrefixLen = 0;
     for (const entry of sourceEntries) {
@@ -229,24 +250,23 @@ function identifyAnchor(
       }
     }
     if (bestPrefix) {
+      const ratio = clamp01(bestPrefixLen / normalizedQuery.length);
       return {
         anchor: bestPrefix.hsAnchor,
-        basis: "tariff_book_structure",
-        detail: `"${query}" partially matches national code ${bestPrefix.code} (${sourceCountry}) on its first ${bestPrefixLen} characters; using its HS anchor ${bestPrefix.hsAnchor}.`,
-        hsAnchorStrength: clamp01(bestPrefixLen / normalizedQuery.length),
         comparisonText: bestPrefix.description,
-        exactVerifiedSourceLookup: false,
+        hsAnchorStrength: clamp01(ratio * 0.75),
+        sourceResolutionVerified: false,
         multiplePlausibleAnchors: false,
+        invalidOrNotFound: false,
       };
     }
     return {
       anchor: null,
-      basis: "exact_code_lookup",
-      detail: `"${query}" does not match any known national code in ${sourceCountry}. The source code could not be verified.`,
-      hsAnchorStrength: 0,
       comparisonText: query,
-      exactVerifiedSourceLookup: false,
+      hsAnchorStrength: 0,
+      sourceResolutionVerified: false,
       multiplePlausibleAnchors: false,
+      invalidOrNotFound: true,
     };
   }
 
@@ -269,33 +289,30 @@ function identifyAnchor(
     // Ambiguous if a distinct anchor scores nearly as well as the winner.
     const multiplePlausibleAnchors =
       !!runnerUp && runnerUp.score > 0 && best.score - runnerUp.score < 0.1;
+    // Tiered anchor strength per spec: 0.85 for a strong description match,
+    // scaled lower for weaker (but still credible) fuzzy matches.
+    let hsAnchorStrength: number;
+    if (best.score >= 0.35) hsAnchorStrength = 0.85;
+    else if (best.score >= 0.2) hsAnchorStrength = 0.65;
+    else hsAnchorStrength = 0.45;
     return {
       anchor: best.entry.hsAnchor,
-      basis: "semantic_description_similarity",
-      detail: `"${query}" is most similar in wording to "${best.entry.description}" (HS ${best.entry.hsAnchor}).`,
-      hsAnchorStrength: clamp01(best.score),
       comparisonText: query,
-      exactVerifiedSourceLookup: false,
+      hsAnchorStrength,
+      sourceResolutionVerified: false,
       multiplePlausibleAnchors,
+      invalidOrNotFound: false,
     };
   }
 
   return {
     anchor: null,
-    basis: "semantic_description_similarity",
-    detail: `No reference description in the dataset shares enough wording with "${query}" to anchor a classification.`,
-    hsAnchorStrength: 0,
     comparisonText: query,
-    exactVerifiedSourceLookup: false,
+    hsAnchorStrength: 0,
+    sourceResolutionVerified: false,
     multiplePlausibleAnchors: false,
+    invalidOrNotFound: true,
   };
-}
-
-function labelForConfidence(confidence: number): MatchLabel {
-  if (confidence >= 0.9) return "exact_match";
-  if (confidence >= 0.7) return "likely_match";
-  if (confidence >= 0.4) return "partial_match";
-  return "manual_review_required";
 }
 
 /** Is the query text itself too thin to carry much classification signal? */
@@ -314,41 +331,73 @@ function strengthTier(value: number): string {
 }
 
 /**
- * Builds the human-readable explanation strictly from the four reasoning
- * components — never from the raw query text or anchor descriptions — so the
- * explanation can never say more than the numbers themselves justify.
+ * Builds the human-readable explanation strictly from the three classification
+ * reasoning components — never from tariff/source verification state — so the
+ * explanation can never say more than the classification evidence justifies.
  */
-function buildExplanationDetail(reasoning: MatchReasoning, isAmbiguous: boolean): string {
+function buildExplanation(
+  reasoning: Omit<MatchReasoning, "explanation">,
+  targetLineCount: number,
+): string {
   const parts = [
     `HS anchor identification: ${strengthTier(reasoning.hs_anchor_strength)} (${Math.round(reasoning.hs_anchor_strength * 100)}%).`,
-    `Description compatibility with the target entry: ${strengthTier(reasoning.description_similarity)} (${Math.round(reasoning.description_similarity * 100)}%).`,
-    isAmbiguous
-      ? `National extension evidence: weak — this HS heading splits into multiple national codes and the query does not distinguish between them (${Math.round(reasoning.national_extension_evidence * 100)}%).`
-      : `National extension evidence: ${strengthTier(reasoning.national_extension_evidence)} (${Math.round(reasoning.national_extension_evidence * 100)}%).`,
-    reasoning.source_completeness >= 1
-      ? "Source: verified national tariff row with a checkable citation."
-      : "Source: not yet verified — pending import from an official schedule.",
+    `Description compatibility with the target entry: ${strengthTier(reasoning.description_compatibility)} (${Math.round(reasoning.description_compatibility * 100)}%).`,
+    targetLineCount > 1
+      ? `National extension specificity: this HS heading splits into ${targetLineCount} national lines and the input does not distinguish between them (${Math.round(reasoning.national_extension_specificity * 100)}%).`
+      : `National extension specificity: a single national line is uniquely supported (${Math.round(reasoning.national_extension_specificity * 100)}%).`,
   ];
   return parts.join(" ");
 }
 
+function sourceStatusFor(entry: TariffCodeEntry): SourceStatus {
+  if (entry.verified) return "official tariff schedule";
+  // An unverified entry that already carries a placeholder/staged rate is
+  // one step further along than a bare nomenclature anchor: the rate is
+  // known to be coming, just not yet curated from an official schedule.
+  if (entry.source && entry.tariffRate) return "tariff data pending";
+  if (entry.source) return "public nomenclature source";
+  return "source unavailable";
+}
+
+function tariffStatusFor(entry: TariffCodeEntry): TariffStatus {
+  return entry.verified && entry.tariffRate ? "available" : "not available in current source data";
+}
+
 function missingAttributesFor(params: {
   isAmbiguous: boolean;
-  isVague: boolean;
-  descriptionSimilarity: number;
+  descriptionCompatibility: number;
 }): string[] {
-  const { isAmbiguous, isVague, descriptionSimilarity } = params;
+  const { isAmbiguous, descriptionCompatibility } = params;
   const attrs = new Set<string>();
   if (isAmbiguous) {
     attrs.add("intended use");
     attrs.add("technical specification");
   }
-  if (isVague || descriptionSimilarity < 0.5) {
+  if (descriptionCompatibility < 0.5) {
     attrs.add("material");
     attrs.add("technical specification");
   }
-  if (attrs.size === 0) return [];
   return [...attrs];
+}
+
+function labelForMatch(params: {
+  confidence: number;
+  sourceResolutionVerified: boolean;
+  uniqueTargetLine: boolean;
+  descriptionCompatibility: number;
+}): MatchLabel {
+  const { confidence, sourceResolutionVerified, uniqueTargetLine, descriptionCompatibility } = params;
+  if (
+    confidence >= 0.9 &&
+    sourceResolutionVerified &&
+    uniqueTargetLine &&
+    descriptionCompatibility >= 0.85
+  ) {
+    return "exact_match";
+  }
+  if (confidence >= 0.7) return "likely_match";
+  if (confidence >= 0.4) return "partial_match";
+  return "manual_review_required";
 }
 
 export function searchTariffMatches(
@@ -361,8 +410,8 @@ export function searchTariffMatches(
   const targetCountry = targetCountryFor(direction);
 
   const anchorResolution = identifyAnchor(query, queryType, sourceCountry);
-  const { anchor, basis, detail, hsAnchorStrength, comparisonText } = anchorResolution;
-  const isVague = isVagueQuery(query, queryType);
+  const { anchor, hsAnchorStrength, comparisonText, sourceResolutionVerified, multiplePlausibleAnchors, invalidOrNotFound } =
+    anchorResolution;
 
   if (!anchor) {
     return {
@@ -371,7 +420,9 @@ export function searchTariffMatches(
       direction,
       anchorHsCode: null,
       manualReviewRequired: true,
-      missing_attributes: ["material", "intended use", "technical specification"],
+      missing_attributes: invalidOrNotFound
+        ? []
+        : ["material", "intended use", "technical specification"],
       matches: [],
     };
   }
@@ -379,78 +430,73 @@ export function searchTariffMatches(
   const targetEntries = entriesForCountry(targetCountry).filter(
     (entry) => entry.hsAnchor === anchor,
   );
-  // True when the anchor splits into multiple target-country extensions with no
-  // way (yet) to tell them apart from the query alone — used to force manual
-  // review even if the raw confidence numbers look reassuring.
+  // True when the anchor splits into multiple target-country extensions with
+  // no way (yet) to tell them apart from the input alone — a genuine
+  // classification-ambiguity signal, independent of tariff-data completeness.
   const isAmbiguous = targetEntries.length > 1;
-  const verifiedTargetEntries = targetEntries.filter((entry) => entry.verified);
-  // Exact-match requires exactly one *verified* target extension — a single
-  // extension that happens to still be pending import does not qualify.
-  const hasSingleVerifiedTarget = verifiedTargetEntries.length === 1;
-  // The source code resolved, but only via a fuzzy/prefix path, or the lookup
-  // itself hit an unverified row — either way the source side isn't solid.
-  const sourceLookupUnverified =
-    queryType !== "description" && !anchorResolution.exactVerifiedSourceLookup;
+  const nationalExtensionSpecificity = isAmbiguous
+    ? targetEntries.length === 2
+      ? 0.5
+      : 0.35
+    : 1;
 
-  const candidates: (TariffMatch & { _isAnchorCandidate: boolean })[] = [];
+  const candidates: TariffMatch[] = [];
 
   for (const entry of targetEntries) {
-    const descriptionSimilarity = clamp01(
+    const descriptionCompatibility = clamp01(
       jaccardSimilarity(tokenize(comparisonText), tokenize(entry.description)),
     );
-    const nationalExtensionEvidence = isAmbiguous ? 0.4 : 1;
-    const sourceCompleteness = entry.verified ? 1 : 0;
 
-    let confidence =
-      0.45 * hsAnchorStrength +
-      0.35 * descriptionSimilarity +
-      0.1 * nationalExtensionEvidence +
-      0.1 * sourceCompleteness;
+    const confidence = clamp01(
+      0.5 * hsAnchorStrength + 0.3 * descriptionCompatibility + 0.2 * nationalExtensionSpecificity,
+    );
 
-    // Confidence caps — applied after the weighted score so the reasoning
-    // components above stay an honest, uncapped record of the evidence.
-    if (isAmbiguous) confidence = Math.min(confidence, 0.84);
-    if (queryType === "description") confidence = Math.min(confidence, 0.79);
-    if (isVague || anchorResolution.multiplePlausibleAnchors) confidence = Math.min(confidence, 0.59);
-    if (!entry.verified) confidence = Math.min(confidence, 0.39);
-    confidence = clamp01(confidence);
+    const matchLabel = labelForMatch({
+      confidence,
+      sourceResolutionVerified,
+      uniqueTargetLine: !isAmbiguous,
+      descriptionCompatibility,
+    });
 
-    // Exact match is only reachable through a narrow, explicit gate — never
-    // just because a source code happened to resolve cleanly.
-    const exactMatchEligible =
-      anchorResolution.exactVerifiedSourceLookup &&
-      hasSingleVerifiedTarget &&
-      entry.verified &&
-      descriptionSimilarity >= 0.85 &&
-      !!entry.source;
-
-    const matchLabel = exactMatchEligible
-      ? "exact_match"
-      : labelForConfidence(Math.min(confidence, 0.89));
-
-    const reasoning: MatchReasoning = {
+    const reasoningCore = {
       hs_anchor_strength: Number(hsAnchorStrength.toFixed(2)),
-      description_similarity: Number(descriptionSimilarity.toFixed(2)),
-      national_extension_evidence: Number(nationalExtensionEvidence.toFixed(2)),
-      source_completeness: Number(sourceCompleteness.toFixed(2)),
+      description_compatibility: Number(descriptionCompatibility.toFixed(2)),
+      national_extension_specificity: Number(nationalExtensionSpecificity.toFixed(2)),
     };
 
+    // Manual review is driven ONLY by classification ambiguity — never by
+    // tariff-rate or source-verification completeness. A multi-line anchor
+    // only counts as ambiguous when nothing in the input distinguishes the
+    // candidates (i.e. description compatibility is too weak to pick a
+    // clear winner among them) — a specific, well-matched description can
+    // still land on a single confident candidate.
+    const extensionAmbiguityUnresolved = isAmbiguous && descriptionCompatibility < 0.7;
+    const manual_review_required =
+      matchLabel === "manual_review_required" || extensionAmbiguityUnresolved || multiplePlausibleAnchors;
+
+    const missing_attributes = missingAttributesFor({
+      isAmbiguous: extensionAmbiguityUnresolved,
+      descriptionCompatibility,
+    });
+
     candidates.push({
-      code: entry.code,
+      matched_code: entry.code,
+      hs6_anchor: entry.hsAnchor,
       country: entry.country,
       description: entry.description,
       match_confidence: Number(confidence.toFixed(2)),
-      matchLabel,
-      explanation: {
-        basis: isAmbiguous ? "tariff_book_structure" : basis,
-        detail: buildExplanationDetail(reasoning, isAmbiguous),
+      match_label: matchLabel,
+      manual_review_required,
+      missing_attributes,
+      reasoning: {
+        ...reasoningCore,
+        explanation: buildExplanation(reasoningCore, targetEntries.length),
       },
-      reasoning,
-      tariffRate: entry.verified ? entry.tariffRate : NOT_AVAILABLE_RATE,
-      tariffNote: entry.tariffNote,
-      source: entry.source,
-      verified: entry.verified,
-      _isAnchorCandidate: true,
+      tariff_rate: entry.verified ? entry.tariffRate : null,
+      tariff_note: entry.tariffNote,
+      tariff_status: tariffStatusFor(entry),
+      source_status: sourceStatusFor(entry),
+      source_references: [entry.source, entry.citation].filter((s): s is string => !!s),
     });
   }
 
@@ -459,7 +505,7 @@ export function searchTariffMatches(
   // only source of candidates when the anchor itself has no direct entries.
   const queryTokens = tokenize(query);
   const targetCountryEntries = entriesForCountry(targetCountry);
-  const seenCodes = new Set(candidates.map((c) => c.code));
+  const seenCodes = new Set(candidates.map((c) => c.matched_code));
 
   const scored = targetCountryEntries
     .filter((entry) => !seenCodes.has(entry.code))
@@ -472,77 +518,72 @@ export function searchTariffMatches(
 
   for (const { entry, score } of scored) {
     if (candidates.length >= 5) break;
-    const descriptionSimilarity = clamp01(score);
-    const nationalExtensionEvidence = 0; // not reached via the shared anchor
-    const sourceCompleteness = entry.verified ? 1 : 0;
+    const descriptionCompatibility = clamp01(score);
+    // Secondary candidates don't share the resolved anchor, so their anchor
+    // strength is inherently weaker — a fuzzy signal, never full strength.
+    const secondaryAnchorStrength = clamp01(hsAnchorStrength * 0.5);
+    const secondaryNationalExtensionSpecificity = 0.3; // not reached via the shared anchor
 
-    let confidence =
-      0.45 * (hsAnchorStrength * 0.5) + // secondary candidate, anchor not shared
-      0.35 * descriptionSimilarity +
-      0.1 * nationalExtensionEvidence +
-      0.1 * sourceCompleteness;
-    confidence = Math.min(confidence, 0.65);
-    // Secondary candidates never share the anchor, so they carry the same
-    // ambiguity/vagueness caps as primary candidates — an unresolved anchor
-    // or thin query undermines every candidate equally.
-    if (isAmbiguous) confidence = Math.min(confidence, 0.84);
-    if (queryType === "description") confidence = Math.min(confidence, 0.79);
-    if (isVague || anchorResolution.multiplePlausibleAnchors) confidence = Math.min(confidence, 0.59);
-    if (!entry.verified) confidence = Math.min(confidence, 0.39);
-    confidence = clamp01(confidence);
+    const confidence = clamp01(
+      0.5 * secondaryAnchorStrength +
+        0.3 * descriptionCompatibility +
+        0.2 * secondaryNationalExtensionSpecificity,
+    );
 
-    const reasoning: MatchReasoning = {
-      hs_anchor_strength: Number((hsAnchorStrength * 0.5).toFixed(2)),
-      description_similarity: Number(descriptionSimilarity.toFixed(2)),
-      national_extension_evidence: 0,
-      source_completeness: Number(sourceCompleteness.toFixed(2)),
+    const matchLabel = labelForMatch({
+      confidence,
+      sourceResolutionVerified: false,
+      uniqueTargetLine: false,
+      descriptionCompatibility,
+    });
+
+    const reasoningCore = {
+      hs_anchor_strength: Number(secondaryAnchorStrength.toFixed(2)),
+      description_compatibility: Number(descriptionCompatibility.toFixed(2)),
+      national_extension_specificity: Number(secondaryNationalExtensionSpecificity.toFixed(2)),
     };
 
+    const missing_attributes = missingAttributesFor({
+      isAmbiguous: true,
+      descriptionCompatibility,
+    });
+
     candidates.push({
-      code: entry.code,
+      matched_code: entry.code,
+      hs6_anchor: entry.hsAnchor,
       country: entry.country,
       description: entry.description,
       match_confidence: Number(confidence.toFixed(2)),
-      matchLabel: labelForConfidence(Math.min(confidence, 0.89)),
-      explanation: {
-        basis: "semantic_description_similarity",
-        detail: buildExplanationDetail(reasoning, isAmbiguous),
+      match_label: matchLabel,
+      // Secondary candidates never resolved through a verified anchor, so a
+      // weak fuzzy anchor signal is itself a "no credible anchor" trigger —
+      // not a blanket true regardless of evidence strength.
+      manual_review_required: matchLabel === "manual_review_required" || secondaryAnchorStrength < 0.5,
+      missing_attributes,
+      reasoning: {
+        ...reasoningCore,
+        explanation: buildExplanation(reasoningCore, 2),
       },
-      reasoning,
-      tariffRate: entry.verified ? entry.tariffRate : NOT_AVAILABLE_RATE,
-      tariffNote: entry.tariffNote,
-      source: entry.source,
-      verified: entry.verified,
-      _isAnchorCandidate: false,
+      tariff_rate: entry.verified ? entry.tariffRate : null,
+      tariff_note: entry.tariffNote,
+      tariff_status: tariffStatusFor(entry),
+      source_status: sourceStatusFor(entry),
+      source_references: [entry.source, entry.citation].filter((s): s is string => !!s),
     });
   }
 
   candidates.sort((a, b) => b.match_confidence - a.match_confidence);
-  const topFive = candidates.slice(0, 5);
-  const matches: TariffMatch[] = topFive.map(({ _isAnchorCandidate, ...m }) => m);
+  const matches = candidates.slice(0, 5);
 
-  const topTwoWithinMargin =
-    matches.length >= 2 && matches[0].match_confidence - matches[1].match_confidence <= 0.08;
-  const noVerifiedCandidate = matches.length === 0 || matches.every((m) => !m.verified);
-  const targetExtensionsDivergeBeyondHs6 = isAmbiguous;
+  // Two close top candidates is itself a classification-ambiguity signal
+  // (requirement #3 of the manual-review trigger list) — flag both.
+  if (matches.length >= 2 && matches[0].match_confidence - matches[1].match_confidence <= 0.08) {
+    matches[0].manual_review_required = true;
+    matches[1].manual_review_required = true;
+  }
 
-  const manualReviewRequired =
-    matches.length === 0 ||
-    matches.every((m) => m.matchLabel === "manual_review_required") ||
-    topTwoWithinMargin ||
-    targetExtensionsDivergeBeyondHs6 ||
-    noVerifiedCandidate ||
-    anchorResolution.multiplePlausibleAnchors ||
-    sourceLookupUnverified;
-
-  const bestDescriptionSimilarity = matches.length
-    ? Math.max(...matches.map((m) => m.reasoning.description_similarity))
-    : 0;
-  const missing_attributes = missingAttributesFor({
-    isAmbiguous: targetExtensionsDivergeBeyondHs6,
-    isVague,
-    descriptionSimilarity: bestDescriptionSimilarity,
-  });
+  const manualReviewRequired = matches.length === 0 || matches.every((m) => m.manual_review_required);
+  const missing_attributes = [...new Set(matches.flatMap((m) => m.missing_attributes))];
 
   return {
     query,

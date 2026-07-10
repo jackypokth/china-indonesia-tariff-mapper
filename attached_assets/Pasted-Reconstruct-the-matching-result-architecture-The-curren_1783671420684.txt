@@ -1,0 +1,73 @@
+Reconstruct the matching-result architecture. The current system incorrectly combines classification confidence with tariff-source verification, causing clear matches to show ~30% confidence and Manual Review Required despite all matching evidence being 100%.
+
+GOAL
+Keep these concepts strictly separate:
+1. match_confidence: likelihood that the input maps to this target tariff classification;
+2. manual_review_required: whether missing product facts prevent a safe classification choice;
+3. source_status: provenance/completeness of the tariff or nomenclature data;
+4. tariff availability: whether a sourced tariff rate can be displayed.
+
+SCORING
+Compute match_confidence ONLY from classification evidence:
+
+match_confidence =
+  0.50 * hs_anchor_strength +
+  0.30 * description_compatibility +
+  0.20 * national_extension_specificity
+
+Do NOT include source verification or tariff availability in match_confidence.
+
+Definitions:
+- hs_anchor_strength: 1.0 for exact valid code resolving to HS6; 0.85 for a strong description-to-HS6 match; lower for fuzzy/prefix matches.
+- description_compatibility: similarity between input/origin description and candidate target description.
+- national_extension_specificity: 1.0 only if one target national line is uniquely supported; lower if several national extensions exist or required differentiating details are missing.
+
+MANUAL REVIEW
+Set manual_review_required=true only if:
+- no credible HS6 anchor exists;
+- two or more HS6 anchors are close in score;
+- top two target candidates are within 0.08;
+- country-specific extensions require an attribute absent from the input;
+- the code is invalid/not found.
+Never set manual_review_required=true solely because tariff rates are pending, source verification is incomplete, or an official tariff file has not yet been imported.
+
+LABELS
+- exact match: >=0.90, source code/anchor is verified, one target national line is uniquely supported, and description compatibility >=0.85.
+- likely match: >=0.70 with a strong shared HS6 but possibly multiple target extensions.
+- partial match: >=0.40 but ambiguity remains.
+- manual review required: <0.40 or manual_review_required=true due to classification ambiguity.
+
+SOURCE / TARIFF BEHAVIOR
+- Add source_status: "official tariff schedule", "public nomenclature source", "tariff data pending", or "source unavailable".
+- Add tariff_status: "available", "not available in current source data", or "not applicable".
+- If a tariff rate is not stored in a verified dataset row, return null. Never display a placeholder number or reduce mapping confidence because it is missing.
+- Keep source citation visible.
+- Do not call an entry "unverified source" when it came from a known nomenclature dataset; instead state exactly what is available and what is missing.
+
+RESULT JSON
+Return:
+{
+  matched_code,
+  hs6_anchor,
+  description,
+  match_confidence,
+  match_label,
+  manual_review_required,
+  missing_attributes: [],
+  reasoning: {
+    hs_anchor_strength,
+    description_compatibility,
+    national_extension_specificity,
+    explanation
+  },
+  tariff_rate: null,
+  tariff_status,
+  source_status,
+  source_references: []
+}
+
+Add tests:
+1. "stainless steel kitchen knives set", China -> Indonesia: strong HS6 result should be likely/exact based on extension specificity, NOT manual review merely due to missing tariff data.
+2. "kitchen tools", China -> Indonesia: partial/manual review due to product ambiguity.
+3. Valid exact local code with no imported tariff rate: classification confidence remains high; tariff status is unavailable.
+4. Invalid code: manual review required and no fabricated result.

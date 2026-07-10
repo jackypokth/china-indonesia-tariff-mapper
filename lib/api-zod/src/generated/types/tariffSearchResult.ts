@@ -18,9 +18,9 @@ export interface TariffSearchResult {
      * @nullable
      */
   anchorHsCode: string | null;
-  /** True when no confident match exists and a human should review. */
+  /** Aggregate convenience flag: true when no candidates could be classified at all, or every candidate individually requires manual review. Prefer each match's own `manual_review_required`. */
   manualReviewRequired: boolean;
-  /** Product attributes the user could supply (e.g. material, intended use, technical specification) to sharpen an ambiguous or low-confidence result. */
+  /** Union of every candidate's missing_attributes, for a single top-of-page hint. */
   missing_attributes: string[];
   /** @maxItems 5 */
   matches: TariffMatch[];

@@ -74,26 +74,37 @@ export interface TariffSearchInput {
   direction: TariffSearchInputDirection;
 }
 
-export type MatchExplanationBasis = typeof MatchExplanationBasis[keyof typeof MatchExplanationBasis];
+/**
+ * Provenance of this entry's classification/tariff data. Kept strictly separate from match_confidence — a classification can be fully certain while its tariff rate is still pending import.
+ */
+export type SourceStatus = typeof SourceStatus[keyof typeof SourceStatus];
 
 
-export const MatchExplanationBasis = {
-  shared_hs_digits: 'shared_hs_digits',
-  semantic_description_similarity: 'semantic_description_similarity',
-  tariff_book_structure: 'tariff_book_structure',
-  exact_code_lookup: 'exact_code_lookup',
+export const SourceStatus = {
+  official_tariff_schedule: 'official tariff schedule',
+  public_nomenclature_source: 'public nomenclature source',
+  tariff_data_pending: 'tariff data pending',
+  source_unavailable: 'source unavailable',
 } as const;
 
-export interface MatchExplanation {
-  basis: MatchExplanationBasis;
-  detail: string;
-}
+/**
+ * Whether a real, sourced tariff rate can be displayed for this candidate.
+ */
+export type TariffStatus = typeof TariffStatus[keyof typeof TariffStatus];
+
+
+export const TariffStatus = {
+  available: 'available',
+  not_available_in_current_source_data: 'not available in current source data',
+  not_applicable: 'not applicable',
+} as const;
 
 /**
- * Transparent breakdown of the weighted confidence formula: 0.45 * hs_anchor_strength + 0.35 * description_similarity + 0.10 * national_extension_evidence + 0.10 * source_completeness. Every component is 0-1.
+ * Transparent breakdown of the weighted, classification-only confidence formula: 0.50 * hs_anchor_strength + 0.30 * description_compatibility + 0.20 * national_extension_specificity. Deliberately excludes any tariff-source verification signal — that is surfaced separately via `tariff_status` / `source_status` on the match.
  */
 export interface MatchReasoning {
   /**
+     * 1.0 for an exact valid code resolving to an HS6 heading, 0.85 for a strong description-to-HS6 match, lower for fuzzy/prefix matches.
      * @minimum 0
      * @maximum 1
      */
@@ -102,41 +113,45 @@ export interface MatchReasoning {
      * @minimum 0
      * @maximum 1
      */
-  description_similarity: number;
+  description_compatibility: number;
   /**
+     * 1.0 only if exactly one target national line is uniquely supported; lower when several national extensions exist.
      * @minimum 0
      * @maximum 1
      */
-  national_extension_evidence: number;
-  /**
-     * @minimum 0
-     * @maximum 1
-     */
-  source_completeness: number;
+  national_extension_specificity: number;
+  /** Human-readable summary generated only from the three components above. */
+  explanation: string;
 }
 
 export interface TariffMatch {
-  code: string;
+  matched_code: string;
+  hs6_anchor: string;
   country: Country;
   description: string;
   /**
-     * Heuristic 0-1 score composed of the reasoning components below. Not an empirically calibrated probability.
+     * Heuristic 0-1 score composed ONLY of classification evidence (see MatchReasoning). Not an empirically calibrated probability, and never capped or reduced by tariff-source completeness.
      * @minimum 0
      * @maximum 1
      */
   match_confidence: number;
-  matchLabel: MatchLabel;
-  explanation: MatchExplanation;
+  match_label: MatchLabel;
+  /** True only when classification evidence itself is ambiguous or insufficient (no credible anchor, competing anchors, competing target candidates, or a national extension requiring an absent attribute). Never true merely because a tariff rate is pending or a source row is unverified. */
+  manual_review_required: boolean;
+  /** Product attributes the user could supply (e.g. material, intended use, technical specification) to sharpen this candidate. */
+  missing_attributes: string[];
   reasoning: MatchReasoning;
   /**
-     * Representative tariff rate, or "Not available in current source data" when unverified. Never a placeholder numeric rate.
+     * Real rate string from a verified dataset row, or null when no verified row stores one. Never a placeholder numeric rate.
      * @nullable
      */
-  tariffRate: string | null;
+  tariff_rate: string | null;
   /** @nullable */
-  tariffNote: string | null;
-  source: string;
-  verified: boolean;
+  tariff_note: string | null;
+  tariff_status: TariffStatus;
+  source_status: SourceStatus;
+  /** Citation(s)/reference(s) backing this entry. */
+  source_references: string[];
 }
 
 export type TariffSearchResultDirection = typeof TariffSearchResultDirection[keyof typeof TariffSearchResultDirection];
@@ -156,9 +171,9 @@ export interface TariffSearchResult {
      * @nullable
      */
   anchorHsCode: string | null;
-  /** True when no confident match exists and a human should review. */
+  /** Aggregate convenience flag: true when no candidates could be classified at all, or every candidate individually requires manual review. Prefer each match's own `manual_review_required`. */
   manualReviewRequired: boolean;
-  /** Product attributes the user could supply (e.g. material, intended use, technical specification) to sharpen an ambiguous or low-confidence result. */
+  /** Union of every candidate's missing_attributes, for a single top-of-page hint. */
   missing_attributes: string[];
   /** @maxItems 5 */
   matches: TariffMatch[];

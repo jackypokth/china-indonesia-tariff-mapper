@@ -1,12 +1,14 @@
 ---
-name: Tariff matcher confidence engine
-description: How match_confidence, exact_match eligibility, and manualReviewRequired are computed in the China–Indonesia tariff mapper.
+name: Tariff confidence engine
+description: How match_confidence, manual_review_required, and tariff/source status are kept strictly separate in the tariff mapper's matching engine.
 ---
 
-The confidence score is a transparent weighted sum, not a calibrated probability — field is named `match_confidence`, and every match returns the 4 underlying components in a `reasoning` object: `hs_anchor_strength` (0.45), `description_similarity` (0.35), `national_extension_evidence` (0.10), `source_completeness` (0.10).
+The matcher separates four concepts that must never bleed into each other:
+- `match_confidence` — classification evidence only: `0.50*hs_anchor_strength + 0.30*description_compatibility + 0.20*national_extension_specificity`. No tariff/source term, no post-hoc caps.
+- `manual_review_required` (per match) — true only for classification-ambiguity reasons: no credible anchor, competing anchors close in score, a multi-line national anchor whose extensions the description doesn't distinguish (`descriptionCompatibility < 0.7`), or invalid/not-found input. Never true merely because a tariff rate is unpublished.
+- `source_status` / `tariff_status` — separate fields for data provenance/availability (`official tariff schedule` / `tariff data pending` / `public nomenclature source` / `source unavailable`; `available` / `not available in current source data`). `tariff_rate` is `null`, never a placeholder string, when unsourced.
+- `match_label` gating requires confidence + an exact, non-fuzzy code resolution + a unique target line + strong description compatibility for `exact_match` — a fuzzy/prefix or ambiguous-anchor resolution can never reach `exact_match` regardless of confidence value.
 
-`exact_match` is only reachable when: the source code resolved via an exact verified lookup, there is exactly one *verified* target national code under the shared HS6 anchor, description similarity between source and target descriptions is >=0.85, and the entry has a source citation. A clean code lookup alone is never enough.
+**Why:** an earlier version blended tariff-source verification into the confidence score and into manual-review triggers, so a 100%-evidence classification could show ~30% confidence and a false "manual review required" purely because its tariff rate hadn't been imported yet.
 
-**Why:** an earlier version labeled results "exact match" purely because the source code parsed cleanly, even when the target side was ambiguous or unverified — misleading for a customs tool where false confidence has real compliance cost.
-
-**How to apply:** when touching `tariffMatcher.ts`, keep confidence caps and `manualReviewRequired` triggers as first-class, independently-checkable conditions (ambiguous target extensions, thin/vague query, unverified source lookup, top-two candidates within 0.08, no verified candidate) rather than folding them into the base formula — this is what a code review previously caught as under-enforced (e.g. secondary/description-only candidates skipping the ambiguity cap, or "exact_match" not requiring the *verified* target count). Unverified tariffRate must always render as `NOT_AVAILABLE_RATE` ("Not available in current source data"), never null or a placeholder number.
+**How to apply:** when adding new match signals, ask whether the signal is about "how certain is this classification" (goes into `match_confidence`/`manual_review_required`) or "how complete/verified is the tariff data" (goes into `source_status`/`tariff_status`/`tariff_rate`) — never combine the two in one field. Keep `missing_attributes` and `manual_review_required` driven by the same ambiguity signal so they don't diverge.

@@ -36,14 +36,11 @@ export const searchTariffMatchesResponseMatchesItemMatchConfidenceMax = 1;
 export const searchTariffMatchesResponseMatchesItemReasoningHsAnchorStrengthMin = 0;
 export const searchTariffMatchesResponseMatchesItemReasoningHsAnchorStrengthMax = 1;
 
-export const searchTariffMatchesResponseMatchesItemReasoningDescriptionSimilarityMin = 0;
-export const searchTariffMatchesResponseMatchesItemReasoningDescriptionSimilarityMax = 1;
+export const searchTariffMatchesResponseMatchesItemReasoningDescriptionCompatibilityMin = 0;
+export const searchTariffMatchesResponseMatchesItemReasoningDescriptionCompatibilityMax = 1;
 
-export const searchTariffMatchesResponseMatchesItemReasoningNationalExtensionEvidenceMin = 0;
-export const searchTariffMatchesResponseMatchesItemReasoningNationalExtensionEvidenceMax = 1;
-
-export const searchTariffMatchesResponseMatchesItemReasoningSourceCompletenessMin = 0;
-export const searchTariffMatchesResponseMatchesItemReasoningSourceCompletenessMax = 1;
+export const searchTariffMatchesResponseMatchesItemReasoningNationalExtensionSpecificityMin = 0;
+export const searchTariffMatchesResponseMatchesItemReasoningNationalExtensionSpecificityMax = 1;
 
 export const searchTariffMatchesResponseMatchesMax = 5;
 
@@ -54,28 +51,28 @@ export const SearchTariffMatchesResponse = zod.object({
   "queryType": zod.enum(['description', 'hs_code', 'local_code']),
   "direction": zod.enum(['china_to_indonesia', 'indonesia_to_china']),
   "anchorHsCode": zod.string().nullable().describe('The nearest HS 6-digit anchor identified for this query, if any.'),
-  "manualReviewRequired": zod.boolean().describe('True when no confident match exists and a human should review.'),
-  "missing_attributes": zod.array(zod.string()).describe('Product attributes the user could supply (e.g. material, intended use, technical specification) to sharpen an ambiguous or low-confidence result.\n'),
+  "manualReviewRequired": zod.boolean().describe('Aggregate convenience flag: true when no candidates could be classified at all, or every candidate individually requires manual review. Prefer each match\'s own `manual_review_required`.\n'),
+  "missing_attributes": zod.array(zod.string()).describe('Union of every candidate\'s missing_attributes, for a single top-of-page hint.'),
   "matches": zod.array(zod.object({
-  "code": zod.string(),
+  "matched_code": zod.string(),
+  "hs6_anchor": zod.string(),
   "country": zod.enum(['china', 'indonesia']),
   "description": zod.string(),
-  "match_confidence": zod.number().min(searchTariffMatchesResponseMatchesItemMatchConfidenceMin).max(searchTariffMatchesResponseMatchesItemMatchConfidenceMax).describe('Heuristic 0-1 score composed of the reasoning components below. Not an empirically calibrated probability.\n'),
-  "matchLabel": zod.enum(['exact_match', 'likely_match', 'partial_match', 'manual_review_required']),
-  "explanation": zod.object({
-  "basis": zod.enum(['shared_hs_digits', 'semantic_description_similarity', 'tariff_book_structure', 'exact_code_lookup']),
-  "detail": zod.string()
-}),
+  "match_confidence": zod.number().min(searchTariffMatchesResponseMatchesItemMatchConfidenceMin).max(searchTariffMatchesResponseMatchesItemMatchConfidenceMax).describe('Heuristic 0-1 score composed ONLY of classification evidence (see MatchReasoning). Not an empirically calibrated probability, and never capped or reduced by tariff-source completeness.\n'),
+  "match_label": zod.enum(['exact_match', 'likely_match', 'partial_match', 'manual_review_required']),
+  "manual_review_required": zod.boolean().describe('True only when classification evidence itself is ambiguous or insufficient (no credible anchor, competing anchors, competing target candidates, or a national extension requiring an absent attribute). Never true merely because a tariff rate is pending or a source row is unverified.\n'),
+  "missing_attributes": zod.array(zod.string()).describe('Product attributes the user could supply (e.g. material, intended use, technical specification) to sharpen this candidate.\n'),
   "reasoning": zod.object({
-  "hs_anchor_strength": zod.number().min(searchTariffMatchesResponseMatchesItemReasoningHsAnchorStrengthMin).max(searchTariffMatchesResponseMatchesItemReasoningHsAnchorStrengthMax),
-  "description_similarity": zod.number().min(searchTariffMatchesResponseMatchesItemReasoningDescriptionSimilarityMin).max(searchTariffMatchesResponseMatchesItemReasoningDescriptionSimilarityMax),
-  "national_extension_evidence": zod.number().min(searchTariffMatchesResponseMatchesItemReasoningNationalExtensionEvidenceMin).max(searchTariffMatchesResponseMatchesItemReasoningNationalExtensionEvidenceMax),
-  "source_completeness": zod.number().min(searchTariffMatchesResponseMatchesItemReasoningSourceCompletenessMin).max(searchTariffMatchesResponseMatchesItemReasoningSourceCompletenessMax)
-}).describe('Transparent breakdown of the weighted confidence formula: 0.45 \* hs_anchor_strength + 0.35 \* description_similarity + 0.10 \* national_extension_evidence + 0.10 \* source_completeness. Every component is 0-1.\n'),
-  "tariffRate": zod.string().nullable().describe('Representative tariff rate, or \"Not available in current source data\" when unverified. Never a placeholder numeric rate.\n'),
-  "tariffNote": zod.string().nullable(),
-  "source": zod.string(),
-  "verified": zod.boolean()
+  "hs_anchor_strength": zod.number().min(searchTariffMatchesResponseMatchesItemReasoningHsAnchorStrengthMin).max(searchTariffMatchesResponseMatchesItemReasoningHsAnchorStrengthMax).describe('1.0 for an exact valid code resolving to an HS6 heading, 0.85 for a strong description-to-HS6 match, lower for fuzzy\/prefix matches.\n'),
+  "description_compatibility": zod.number().min(searchTariffMatchesResponseMatchesItemReasoningDescriptionCompatibilityMin).max(searchTariffMatchesResponseMatchesItemReasoningDescriptionCompatibilityMax),
+  "national_extension_specificity": zod.number().min(searchTariffMatchesResponseMatchesItemReasoningNationalExtensionSpecificityMin).max(searchTariffMatchesResponseMatchesItemReasoningNationalExtensionSpecificityMax).describe('1.0 only if exactly one target national line is uniquely supported; lower when several national extensions exist.\n'),
+  "explanation": zod.string().describe('Human-readable summary generated only from the three components above.')
+}).describe('Transparent breakdown of the weighted, classification-only confidence formula: 0.50 \* hs_anchor_strength + 0.30 \* description_compatibility + 0.20 \* national_extension_specificity. Deliberately excludes any tariff-source verification signal — that is surfaced separately via `tariff_status` \/ `source_status` on the match.\n'),
+  "tariff_rate": zod.string().nullable().describe('Real rate string from a verified dataset row, or null when no verified row stores one. Never a placeholder numeric rate.\n'),
+  "tariff_note": zod.string().nullable(),
+  "tariff_status": zod.enum(['available', 'not available in current source data', 'not applicable']).describe('Whether a real, sourced tariff rate can be displayed for this candidate.'),
+  "source_status": zod.enum(['official tariff schedule', 'public nomenclature source', 'tariff data pending', 'source unavailable']).describe('Provenance of this entry\'s classification\/tariff data. Kept strictly separate from match_confidence — a classification can be fully certain while its tariff rate is still pending import.\n'),
+  "source_references": zod.array(zod.string()).describe('Citation(s)\/reference(s) backing this entry.')
 })).max(searchTariffMatchesResponseMatchesMax)
 })
 

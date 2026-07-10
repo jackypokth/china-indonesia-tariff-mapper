@@ -365,10 +365,13 @@ components:
         improvement_panel_visible:
           type: boolean
           description: >
-            True only when manualReviewRequired is true, OR candidate_margin
-            < 0.08, OR required_attributes is non-empty. Drives the single
-            shared "Improve classification precision" panel; never true for a
-            clear, high-separation match.
+            True only when manualReviewRequired is true, OR (at least 2
+            plausible distinct-anchor candidates AND candidate_margin < 0.08
+            AND missing_attributes is non-empty). Drives the single shared
+            "Improve classification precision" panel; never true for a
+            clear, high-separation match, a single plausible candidate, or
+            when missing_attributes is empty (e.g. the only issue is
+            unavailable tariff/source data).
         matches:
           type: array
           maxItems: 5

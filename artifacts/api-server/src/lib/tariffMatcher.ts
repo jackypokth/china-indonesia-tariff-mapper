@@ -293,11 +293,54 @@ interface AttributeSignal {
   otherKeywords: string[];
 }
 
+/** Words that appear in more than one option for a given attribute are
+ * non-discriminating and must be ignored when deciding which option a text
+ * matches — e.g. both "stainless steel" and "carbon steel" contain "steel",
+ * so plain OR-matching on that word would make the text look like it
+ * ambiguously matches both. Stripping shared words down to each option's
+ * distinctive keyword(s) ("stainless" vs "carbon") fixes that without
+ * requiring every word in a compound option (like "boxed set") to be
+ * present verbatim. */
+function distinctiveKeywordsByOption(options: string[]): Map<string, string[]> {
+  const perOption = options.map((opt) => ({ opt, kws: attributeOptionKeywords(opt) }));
+  const freq = new Map<string, number>();
+  for (const { kws } of perOption) {
+    for (const kw of new Set(kws)) freq.set(kw, (freq.get(kw) ?? 0) + 1);
+  }
+  const result = new Map<string, string[]>();
+  for (const { opt, kws } of perOption) {
+    const distinctive = kws.filter((kw) => (freq.get(kw) ?? 0) === 1);
+    result.set(opt, distinctive.length > 0 ? distinctive : kws);
+  }
+  return result;
+}
+
+/** Flattens the attributes the LLM already extracted for the query into a
+ * plain-text blob usable with the same whole-word keyword matching as raw
+ * query text — e.g. a normalized fact of "stainless steel" satisfies the
+ * "stainless steel"/"stainless" synonym even when the user only wrote
+ * "steel", and a structured `is_retail_set: true` satisfies "set" wording
+ * even when the query used a different phrase for it. */
+function factsAnswerText(facts: ProductFacts | null): string {
+  if (!facts) return "";
+  const parts = [
+    facts.primary_product_type,
+    facts.primary_function,
+    facts.intended_use,
+    ...facts.materials,
+    ...facts.key_attributes,
+  ].filter(Boolean);
+  if (facts.is_retail_set) parts.push("set boxed set retail set");
+  return parts.join(" ").toLowerCase();
+}
+
 /**
- * For a classification rule, detect which attributes the raw query text
- * already pins down unambiguously — exactly one option's keywords appear,
- * and no other option's keywords for that same attribute do. Used to:
- *   (a) avoid re-asking a question the user already answered in free text,
+ * For a classification rule, detect which attributes are already pinned
+ * down unambiguously by the raw query text and/or the extracted product
+ * facts — exactly one option's distinctive keywords appear, and no other
+ * option's distinctive keywords for that same attribute do. Used to:
+ *   (a) avoid re-asking a question the user already answered (in free text
+ *       or via structured/extracted facts — e.g. materials, is_retail_set),
  *   (b) reward/penalize candidate descriptions that agree/disagree with the
  *       detected value — a targeted contradiction signal within the
  *       attribute_match component (e.g. "wired" and "wireless" share zero
@@ -306,15 +349,18 @@ interface AttributeSignal {
 function detectAttributeSignals(
   queryLower: string,
   rule: ClassificationRule,
+  facts: ProductFacts | null = null,
 ): Map<string, AttributeSignal> {
+  const detectionText = `${queryLower} ${factsAnswerText(facts)}`.trim();
   const signals = new Map<string, AttributeSignal>();
   for (const attr of rule.requiredAttributes) {
     const options = rule.attributeOptions[attr] ?? [];
     if (options.length < 2) continue;
+    const distinctiveKeywords = distinctiveKeywordsByOption(options);
     const matchedOptions = options.filter((opt) =>
-      attributeOptionKeywords(opt).some((kw) => containsKeyword(queryLower, kw)),
+      (distinctiveKeywords.get(opt) ?? []).some((kw) => containsKeyword(detectionText, kw)),
     );
-    if (matchedOptions.length !== 1) continue; // no signal, or the query itself is ambiguous
+    if (matchedOptions.length !== 1) continue; // no signal, or the text itself is ambiguous
     const matchedOption = matchedOptions[0];
     signals.set(attr, {
       matchedOption,
@@ -346,33 +392,60 @@ function attributeCompatibilityAdjustment(
   return adjustment;
 }
 
-/** Attributes that would distinguish the top two candidates, sourced from
- * the classification_rules table for the top anchor when covered, else a
- * generic fallback used only while genuinely ambiguous. Attributes the query
- * already answers unambiguously (per `answeredAttributes`) are excluded —
- * the panel should never re-ask a question the free-text query already
- * settled. */
+/**
+ * missing_attributes = decision_relevant_attributes_for_top_competing_candidates
+ *                       minus extracted_product_facts (and free-text query).
+ *
+ * "Decision-relevant" attributes are pulled from the classification_rules
+ * table for every distinct HS6 anchor among the top competing candidates
+ * (not just the single top anchor) — when two different product families
+ * are both plausible, the panel must ask whatever distinguishes either of
+ * them. Falls back to a generic prompt only when none of the competing
+ * anchors are covered by a known rule and the match is otherwise weak.
+ * Attributes already pinned down — via free text OR structured/extracted
+ * product facts (`detectAttributeSignals`, comparing normalized values and
+ * synonyms) — are excluded so the panel never re-asks a settled question.
+ */
 function requiredAttributesFor(params: {
-  ambiguityLevel: AmbiguityLevel;
-  topAnchor: string | null;
+  competingAnchors: string[];
   topEvidenceStrength: number;
-  answeredAttributes: Set<string>;
-}): { rule: ClassificationRule | null; attributes: string[] } {
-  const { ambiguityLevel, topAnchor, topEvidenceStrength, answeredAttributes } = params;
-  if (ambiguityLevel === "low") return { rule: null, attributes: [] };
+  queryLower: string;
+  facts: ProductFacts | null;
+}): { rules: ClassificationRule[]; attributes: string[]; attributeOptions: Record<string, string[]> } {
+  const { competingAnchors, topEvidenceStrength, queryLower, facts } = params;
 
-  const rule = findRuleForAnchor(topAnchor);
-  if (rule) {
+  const rules = competingAnchors
+    .map((anchor) => findRuleForAnchor(anchor))
+    .filter((r): r is ClassificationRule => !!r);
+
+  if (rules.length > 0) {
+    const answeredAttributes = new Set<string>();
+    for (const rule of rules) {
+      for (const attr of detectAttributeSignals(queryLower, rule, facts).keys()) {
+        answeredAttributes.add(attr);
+      }
+    }
+    const decisionRelevantAttributes = Array.from(
+      new Set(rules.flatMap((rule) => rule.requiredAttributes)),
+    );
+    const attributeOptions: Record<string, string[]> = {};
+    for (const rule of rules) {
+      for (const [attr, options] of Object.entries(rule.attributeOptions)) {
+        if (!attributeOptions[attr]) attributeOptions[attr] = options;
+      }
+    }
     return {
-      rule,
-      attributes: rule.requiredAttributes.filter((attr) => !answeredAttributes.has(attr)),
+      rules,
+      attributes: decisionRelevantAttributes.filter((attr) => !answeredAttributes.has(attr)),
+      attributeOptions,
     };
   }
 
-  if (ambiguityLevel === "high" || topEvidenceStrength < 0.5) {
-    return { rule: null, attributes: ["material", "intended use", "technical specification"] };
+  if (topEvidenceStrength < 0.5) {
+    const fallback = ["material", "intended use", "technical specification"];
+    return { rules: [], attributes: fallback, attributeOptions: {} };
   }
-  return { rule: null, attributes: [] };
+  return { rules: [], attributes: [], attributeOptions: {} };
 }
 
 function normalizeCodeOnly(raw: string): string {
@@ -559,6 +632,11 @@ export async function searchTariffMatches(
 
   let candidateMatches: TariffMatch[] = [];
   const siblingLineCountByAnchor = new Map<string, number>();
+  /** Structured facts extracted from the query (description queries only).
+   * Used later, alongside the free-text query, to decide which required
+   * attributes are already answered — an hs_code/local_code query has no
+   * free-text facts to extract, so this stays null for those paths. */
+  let facts: ProductFacts | null = null;
 
   if (queryType === "description") {
     // Attribute-first hierarchical workflow (steps 1-6):
@@ -566,7 +644,7 @@ export async function searchTariffMatches(
     //   2. Retrieve 5-10 candidate HS6 headings (lexical + semantic).
     //   3-5. Score each candidate (LLM + deterministic taxonomy fallback and
     //        exclusion/cap rule), then compute per-national-line confidence.
-    const facts = await extractProductFacts(query);
+    facts = await extractProductFacts(query);
     const retrieved = retrieveCandidates(query, 10);
     const scored: ScoredCandidate[] = await scoreCandidates(
       query,
@@ -702,22 +780,39 @@ export async function searchTariffMatches(
   }
 
   const topAnchor = matches[0]?.hs6_anchor ?? null;
-  const topRule = findRuleForAnchor(topAnchor);
-  const topAnsweredAttributes = new Set(topRule ? detectAttributeSignals(queryLower, topRule).keys() : []);
   const topEvidenceStrength = matches[0]
     ? (matches[0].reasoning.product_type_match + matches[0].reasoning.function_match) / 2
     : 0;
 
-  const { rule, attributes: required_attributes } = requiredAttributesFor({
-    ambiguityLevel: ambiguity_level,
-    topAnchor,
+  // "Top competing candidates" — every distinct anchor among the surfaced
+  // matches (not just the single top one), since a genuinely close second
+  // candidate from a different product family can raise its own
+  // decision-relevant attribute (e.g. material) even if the top anchor
+  // alone wouldn't have needed to ask about it.
+  const competingAnchors: string[] = [];
+  for (const m of matches) {
+    if (!competingAnchors.includes(m.hs6_anchor)) competingAnchors.push(m.hs6_anchor);
+    if (competingAnchors.length >= 3) break;
+  }
+
+  const { attributes: missing_attributes, attributeOptions: attribute_options } = requiredAttributesFor({
+    competingAnchors,
     topEvidenceStrength,
-    answeredAttributes: topAnsweredAttributes,
+    queryLower,
+    facts,
   });
-  const attribute_options = rule?.attributeOptions ?? {};
+  const required_attributes = missing_attributes;
 
   const manualReviewRequired = matches.length === 0 || matches.every((m) => m.manual_review_required);
-  const improvement_panel_visible = manualReviewRequired || ambiguity_level === "high" || required_attributes.length > 0;
+  // A distinct anchor is "plausible" once it isn't stuck at
+  // manual_review_required — used only to gate the shared precision panel,
+  // never to alter match_confidence/match_label themselves.
+  const plausibleAnchorCount = new Set(
+    matches.filter((m) => m.match_label !== "manual_review_required").map((m) => m.hs6_anchor),
+  ).size;
+  const improvement_panel_visible =
+    manualReviewRequired ||
+    (plausibleAnchorCount >= 2 && candidate_margin < 0.08 && missing_attributes.length > 0);
 
   // Wording layer (GPT-controlled, evidence-only) for the final top-5 only.
   await Promise.all(

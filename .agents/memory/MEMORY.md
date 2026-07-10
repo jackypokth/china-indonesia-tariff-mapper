@@ -2,3 +2,4 @@
 - [Tariff confidence engine](tariff-confidence-engine.md) — attribute-first hierarchical formula (product type/function dominate); exclusion/cap rule and GPT wording layer are backend-enforced, never LLM-controlled.
 - [Tariff rate verification](tariff-rate-verification.md) — TRQ in-quota vs out-of-quota rates are easy to transpose; always cite the specific quota-schedule row and label direction explicitly.
 - [Embeddings proxy limitation](embeddings-proxy-limitation.md) — Replit's managed OpenAI proxy has no embeddings endpoint; substitute local TF-IDF/n-gram cosine + BM25 and flag the deviation to the user.
+- [Tariff precision panel gating](tariff-precision-panel.md) — missing_attributes/panel visibility must use synonym-aware fact matching and distinct-anchor competition, not raw keyword OR-matching.

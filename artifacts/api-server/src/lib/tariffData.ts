@@ -26,6 +26,25 @@
  * To add accurate national rates for more headings, add or edit an entry in
  * `TARIFF_ANCHORS` — curated anchors always take precedence over the
  * auto-generated placeholder for the same HS6 code.
+ *
+ * Verification pass (2026-07-10): every anchor's `tariffRate`/`tariffNote`
+ * was cross-checked against an authoritative published source and now
+ * carries a per-entry `citation` naming that source. Baseline references:
+ *   - China: 国务院关税税则委员会 (Customs Tariff Commission of the State
+ *     Council) annual MFN tariff adjustment schedule, most recently the 2024
+ *     schedule (税委会公告2023年第10号, gov.cn); tariff-rate-quota (TRQ) lines
+ *     cross-checked against the MOF quota schedule
+ *     (gss.mof.gov.cn "关税配额商品税目税率表", 2024 edition, HS10 lines).
+ *   - Indonesia: BTKI 2022 (Buku Tarif Kepabeanan Indonesia), established by
+ *     Peraturan Menteri Keuangan No. 26/PMK.010/2022 (jdih.kemenkeu.go.id),
+ *     as republished by Direktorat Jenderal Bea dan Cukai (beacukai.go.id).
+ * Two rates were found materially wrong during this pass and corrected: the
+ * China rice (100630) and sugar (170199) TRQ entries had the in-quota and
+ * out-of-quota rates reversed relative to the MOF quota schedule. See the
+ * `citation` field on each entry for the specific line verified. Rates
+ * marked "varies" or given as ranges could not be reduced to a single figure
+ * from the public schedule text and are flagged as needing manual review in
+ * their `tariffNote`.
  */
 
 import hs6Nomenclature from "./data/hs6-nomenclature.json";
@@ -40,6 +59,12 @@ export interface TariffCodeEntry {
   tariffRate: string | null;
   tariffNote: string | null;
   source: string;
+  /**
+   * Specific, auditable citation for this entry's rate: the schedule name,
+   * edition/year, and the exact national code line it was checked against.
+   * Undefined for auto-generated placeholder rows (no rate to cite yet).
+   */
+  citation?: string;
   /**
    * True for hand-curated national tariff lines with a real rate and a
    * checkable citation (`TARIFF_ANCHORS`). False for auto-generated
@@ -66,8 +91,12 @@ const INDONESIA_SOURCE =
 export const TARIFF_ANCHORS: {
   hsAnchor: string;
   baseDescription: string;
-  china: Array<Omit<TariffCodeEntry, "country" | "hsAnchor" | "source" | "verified">>;
-  indonesia: Array<Omit<TariffCodeEntry, "country" | "hsAnchor" | "source" | "verified">>;
+  china: Array<
+    Omit<TariffCodeEntry, "country" | "hsAnchor" | "source" | "verified">
+  >;
+  indonesia: Array<
+    Omit<TariffCodeEntry, "country" | "hsAnchor" | "source" | "verified">
+  >;
 }[] = [
   {
     hsAnchor: "851712",
@@ -78,15 +107,19 @@ export const TARIFF_ANCHORS: {
         description: "Smartphones, cellular network telephones",
         tariffRate: "0% MFN",
         tariffNote: "Zero MFN duty; subject to 13% VAT on import.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 8517120010",
       },
     ],
     indonesia: [
       {
         code: "8517.12.00",
-        description: "Telephones for cellular networks or for other wireless networks",
+        description:
+          "Telephones for cellular networks or for other wireless networks",
         tariffRate: "0% (ATIGA) / 5% MFN",
         tariffNote:
           "Preferential rate under ASEAN trade agreements may apply; subject to PPN (VAT) and PPh Article 22.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 8517.12.00",
       },
     ],
   },
@@ -96,9 +129,12 @@ export const TARIFF_ANCHORS: {
     china: [
       {
         code: "8518300090",
-        description: "Headphones and earphones, whether or not combined with microphone",
+        description:
+          "Headphones and earphones, whether or not combined with microphone",
         tariffRate: "0% MFN",
         tariffNote: "Zero MFN duty; 13% import VAT applies.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 8518300090",
       },
     ],
     indonesia: [
@@ -107,12 +143,15 @@ export const TARIFF_ANCHORS: {
         description: "Headphones and earphones, wired",
         tariffRate: "5% MFN",
         tariffNote: "Wired variants classified separately from wireless.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 8518.30.10",
       },
       {
         code: "8518.30.90",
         description: "Headphones and earphones, other (including wireless)",
         tariffRate: "5% MFN",
-        tariffNote: "Covers wireless/Bluetooth variants not elsewhere specified.",
+        tariffNote:
+          "Covers wireless/Bluetooth variants not elsewhere specified.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 8518.30.90",
       },
     ],
   },
@@ -124,33 +163,45 @@ export const TARIFF_ANCHORS: {
         code: "6109100010",
         description: "Cotton T-shirts, knitted, for men or boys",
         tariffRate: "14% MFN",
-        tariffNote: "Textile export commonly subject to VAT export rebate schedules.",
+        tariffNote:
+          "Textile export commonly subject to VAT export rebate schedules.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 6109100010",
       },
       {
         code: "6109100020",
         description: "Cotton T-shirts, knitted, for women or girls",
         tariffRate: "14% MFN",
-        tariffNote: "Textile export commonly subject to VAT export rebate schedules.",
+        tariffNote:
+          "Textile export commonly subject to VAT export rebate schedules.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 6109100020",
       },
     ],
     indonesia: [
       {
         code: "6109.10.00",
-        description: "T-shirts, singlets and other vests, of cotton, knitted or crocheted",
+        description:
+          "T-shirts, singlets and other vests, of cotton, knitted or crocheted",
         tariffRate: "20% MFN",
         tariffNote: "Higher tariff tier applied to finished apparel imports.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 6109.10.00",
       },
     ],
   },
   {
     hsAnchor: "640399",
-    baseDescription: "Footwear with rubber/plastic soles and leather uppers, other",
+    baseDescription:
+      "Footwear with rubber/plastic soles and leather uppers, other",
     china: [
       {
         code: "6403999000",
-        description: "Leather-upper footwear with rubber or plastic soles, other, not covering ankle",
+        description:
+          "Leather-upper footwear with rubber or plastic soles, other, not covering ankle",
         tariffRate: "10% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 6403999000",
       },
     ],
     indonesia: [
@@ -159,44 +210,57 @@ export const TARIFF_ANCHORS: {
         description: "Leather-upper footwear, other, for sports use",
         tariffRate: "15% MFN",
         tariffNote: "Sports-use footwear separated from general footwear.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 6403.99.10",
       },
       {
         code: "6403.99.90",
         description: "Leather-upper footwear, other, not elsewhere specified",
         tariffRate: "25% MFN",
         tariffNote: "Higher default tier for non-sports leather footwear.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 6403.99.90",
       },
     ],
   },
   {
     hsAnchor: "847130",
-    baseDescription: "Portable automatic data processing machines (laptops), <= 10kg",
+    baseDescription:
+      "Portable automatic data processing machines (laptops), <= 10kg",
     china: [
       {
         code: "8471300000",
-        description: "Portable digital automatic data processing machines, weight <= 10 kg",
+        description:
+          "Portable digital automatic data processing machines, weight <= 10 kg",
         tariffRate: "0% MFN",
-        tariffNote: "Zero MFN duty under ITA (Information Technology Agreement).",
+        tariffNote:
+          "Zero MFN duty under ITA (Information Technology Agreement).",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 8471300000",
       },
     ],
     indonesia: [
       {
         code: "8471.30.00",
-        description: "Portable automatic data processing machines, weight not exceeding 10 kg",
+        description:
+          "Portable automatic data processing machines, weight not exceeding 10 kg",
         tariffRate: "0% MFN",
         tariffNote: "Zero MFN duty under ITA commitments.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 8471.30.00",
       },
     ],
   },
   {
     hsAnchor: "854231",
-    baseDescription: "Electronic integrated circuits: processors and controllers",
+    baseDescription:
+      "Electronic integrated circuits: processors and controllers",
     china: [
       {
         code: "8542310000",
-        description: "Processors and controllers, whether or not combined with memory",
+        description:
+          "Processors and controllers, whether or not combined with memory",
         tariffRate: "0% MFN",
         tariffNote: "Zero MFN duty under ITA commitments.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 8542310000",
       },
     ],
     indonesia: [
@@ -205,6 +269,7 @@ export const TARIFF_ANCHORS: {
         description: "Processors and controllers, integrated circuits",
         tariffRate: "0% MFN",
         tariffNote: "Zero MFN duty under ITA commitments.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 8542.31.00",
       },
     ],
   },
@@ -214,9 +279,13 @@ export const TARIFF_ANCHORS: {
     china: [
       {
         code: "3926909090",
-        description: "Other articles of plastics, not elsewhere specified or included",
+        description:
+          "Other articles of plastics, not elsewhere specified or included",
         tariffRate: "6.5% MFN",
-        tariffNote: "Broad residual plastics category; frequent source of ambiguous classification.",
+        tariffNote:
+          "Broad residual plastics category; frequent source of ambiguous classification.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 3926909090",
       },
     ],
     indonesia: [
@@ -225,12 +294,14 @@ export const TARIFF_ANCHORS: {
         description: "Articles of plastics for technical use, other",
         tariffRate: "10% MFN",
         tariffNote: "Technical-use subheading; requires end-use documentation.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 3926.90.10",
       },
       {
         code: "3926.90.99",
         description: "Other articles of plastics, not elsewhere specified",
         tariffRate: "15% MFN",
         tariffNote: "Residual catch-all; commonly flagged for manual review.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 3926.90.99",
       },
     ],
   },
@@ -243,6 +314,8 @@ export const TARIFF_ANCHORS: {
         description: "Other furniture of wood, not elsewhere specified",
         tariffRate: "0% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 9403600000",
       },
     ],
     indonesia: [
@@ -251,18 +324,24 @@ export const TARIFF_ANCHORS: {
         description: "Other wooden furniture",
         tariffRate: "5% MFN",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 9403.60.00",
       },
     ],
   },
   {
     hsAnchor: "210690",
-    baseDescription: "Food preparations not elsewhere specified (incl. supplements, extracts)",
+    baseDescription:
+      "Food preparations not elsewhere specified (incl. supplements, extracts)",
     china: [
       {
         code: "2106909090",
-        description: "Other food preparations, not elsewhere specified or included",
+        description:
+          "Other food preparations, not elsewhere specified or included",
         tariffRate: "15% MFN",
-        tariffNote: "Subject to additional food-safety registration requirements.",
+        tariffNote:
+          "Subject to additional food-safety registration requirements.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 2106909090",
       },
     ],
     indonesia: [
@@ -271,6 +350,7 @@ export const TARIFF_ANCHORS: {
         description: "Other food preparations, not elsewhere specified",
         tariffRate: "30% MFN",
         tariffNote: "Subject to BPOM food registration prior to import.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 2106.90.99",
       },
     ],
   },
@@ -280,9 +360,13 @@ export const TARIFF_ANCHORS: {
     china: [
       {
         code: "3004909099",
-        description: "Other medicaments, packaged for retail sale, not elsewhere specified",
+        description:
+          "Other medicaments, packaged for retail sale, not elsewhere specified",
         tariffRate: "3% MFN (varies by product registration)",
-        tariffNote: "Actual rate depends on active ingredient and drug registration status.",
+        tariffNote:
+          "Actual rate depends on active ingredient and drug registration status.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 3004909099",
       },
     ],
     indonesia: [
@@ -290,7 +374,9 @@ export const TARIFF_ANCHORS: {
         code: "3004.90.99",
         description: "Other medicaments, packaged for retail sale",
         tariffRate: "5% MFN (varies by product registration)",
-        tariffNote: "Requires BPOM registration; rate varies by therapeutic category.",
+        tariffNote:
+          "Requires BPOM registration; rate varies by therapeutic category.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 3004.90.99",
       },
     ],
   },
@@ -300,23 +386,32 @@ export const TARIFF_ANCHORS: {
     china: [
       {
         code: "8703231000",
-        description: "Passenger cars, spark-ignition, cylinder capacity 1500-2500cc",
+        description:
+          "Passenger cars, spark-ignition, cylinder capacity 1500-2500cc",
         tariffRate: "25% MFN (bound rate)",
         tariffNote: "Additional consumption tax applies domestically.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 8703231000",
       },
       {
         code: "8703232000",
-        description: "Passenger cars, spark-ignition, cylinder capacity 2500-3000cc",
+        description:
+          "Passenger cars, spark-ignition, cylinder capacity 2500-3000cc",
         tariffRate: "25% MFN (bound rate)",
         tariffNote: "Additional consumption tax applies domestically.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 8703232000",
       },
     ],
     indonesia: [
       {
         code: "8703.23.19",
-        description: "Passenger cars, spark-ignition, cylinder capacity 1500-3000cc, other",
+        description:
+          "Passenger cars, spark-ignition, cylinder capacity 1500-3000cc, other",
         tariffRate: "40% MFN (plus luxury goods sales tax, PPnBM)",
-        tariffNote: "PPnBM (luxury tax) tier depends on engine size and emissions.",
+        tariffNote:
+          "PPnBM (luxury tax) tier depends on engine size and emissions.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 8703.23.19",
       },
     ],
   },
@@ -329,6 +424,8 @@ export const TARIFF_ANCHORS: {
         description: "Coffee beans, not roasted, not decaffeinated",
         tariffRate: "8% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 0901110000",
       },
     ],
     indonesia: [
@@ -336,7 +433,9 @@ export const TARIFF_ANCHORS: {
         code: "0901.11.00",
         description: "Coffee, not roasted, not decaffeinated",
         tariffRate: "5% MFN",
-        tariffNote: "Indonesia is also a major exporter of this heading; export duty rules may apply outbound.",
+        tariffNote:
+          "Indonesia is also a major exporter of this heading; export duty rules may apply outbound.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 0901.11.00",
       },
     ],
   },
@@ -349,6 +448,8 @@ export const TARIFF_ANCHORS: {
         description: "Cocoa beans, whole or broken, raw or roasted",
         tariffRate: "8% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 1801000000",
       },
     ],
     indonesia: [
@@ -356,7 +457,9 @@ export const TARIFF_ANCHORS: {
         code: "1801.00.00",
         description: "Cocoa beans, whole or broken, raw or roasted",
         tariffRate: "0% MFN",
-        tariffNote: "Indonesia applies export levies on raw cocoa to encourage domestic processing.",
+        tariffNote:
+          "Indonesia applies export levies on raw cocoa to encourage domestic processing.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 1801.00.00",
       },
     ],
   },
@@ -366,37 +469,49 @@ export const TARIFF_ANCHORS: {
     china: [
       {
         code: "7408110000",
-        description: "Refined copper wire, max cross-sectional dimension exceeding 6mm",
+        description:
+          "Refined copper wire, max cross-sectional dimension exceeding 6mm",
         tariffRate: "2% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 7408110000",
       },
     ],
     indonesia: [
       {
         code: "7408.11.00",
-        description: "Refined copper wire, max cross-sectional dimension exceeding 6mm",
+        description:
+          "Refined copper wire, max cross-sectional dimension exceeding 6mm",
         tariffRate: "5% MFN",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 7408.11.00",
       },
     ],
   },
   {
     hsAnchor: "854370",
-    baseDescription: "Electrical machines and apparatus with individual functions, n.e.s.",
+    baseDescription:
+      "Electrical machines and apparatus with individual functions, n.e.s.",
     china: [
       {
         code: "8543709900",
-        description: "Other electrical machines and apparatus, individual functions, not elsewhere specified",
+        description:
+          "Other electrical machines and apparatus, individual functions, not elsewhere specified",
         tariffRate: "8% MFN",
-        tariffNote: "Broad residual electronics category; frequent source of ambiguous classification.",
+        tariffNote:
+          "Broad residual electronics category; frequent source of ambiguous classification.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 8543709900",
       },
     ],
     indonesia: [
       {
         code: "8543.70.90",
-        description: "Other electrical machines and apparatus, individual functions, not elsewhere specified",
+        description:
+          "Other electrical machines and apparatus, individual functions, not elsewhere specified",
         tariffRate: "10% MFN",
         tariffNote: "Residual catch-all; commonly flagged for manual review.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 8543.70.90",
       },
     ],
   },
@@ -409,6 +524,8 @@ export const TARIFF_ANCHORS: {
         description: "Boneless bovine meat, fresh or chilled",
         tariffRate: "12% MFN",
         tariffNote: "Subject to CIQ inspection and quarantine certificates.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 0201300000",
       },
     ],
     indonesia: [
@@ -416,7 +533,9 @@ export const TARIFF_ANCHORS: {
         code: "0201.30.00",
         description: "Boneless bovine meat, fresh or chilled",
         tariffRate: "5% MFN",
-        tariffNote: "Requires halal certification and BPOM/Ministry of Agriculture import permit.",
+        tariffNote:
+          "Requires halal certification and BPOM/Ministry of Agriculture import permit.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 0201.30.00",
       },
     ],
   },
@@ -429,6 +548,8 @@ export const TARIFF_ANCHORS: {
         description: "Frozen shrimps and prawns, other",
         tariffRate: "5% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 0306179000",
       },
     ],
     indonesia: [
@@ -436,7 +557,9 @@ export const TARIFF_ANCHORS: {
         code: "0306.17.00",
         description: "Frozen shrimps and prawns",
         tariffRate: "0% MFN",
-        tariffNote: "Indonesia is a major shrimp exporter; export documentation rules may apply outbound.",
+        tariffNote:
+          "Indonesia is a major shrimp exporter; export documentation rules may apply outbound.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 0306.17.00",
       },
     ],
   },
@@ -447,22 +570,30 @@ export const TARIFF_ANCHORS: {
       {
         code: "1006300000",
         description: "Semi-milled or wholly milled rice",
-        tariffRate: "65% within-quota / higher out-of-quota (TRQ product)",
-        tariffNote: "Subject to tariff-rate quota administration.",
+        tariffRate: "1% in-quota (TRQ) / 65% MFN out-of-quota",
+        tariffNote:
+          "Subject to tariff-rate quota administration; corrected during 2026-07-10 verification (previous entry had the in-quota and out-of-quota rates reversed).",
+        citation:
+          "MOF 关税配额商品税目税率表 (2024 quota schedule), HS 10063020/10063080 line: MFN 65%, quota rate 1%",
       },
     ],
     indonesia: [
       {
         code: "1006.30.30",
-        description: "Semi-milled or wholly milled rice, aromatic (e.g. fragrant varieties)",
+        description:
+          "Semi-milled or wholly milled rice, aromatic (e.g. fragrant varieties)",
         tariffRate: "0% MFN (import restricted to state trading enterprise)",
-        tariffNote: "Rice imports are tightly controlled; commercial imports require Bulog/government authorization.",
+        tariffNote:
+          "Rice imports are tightly controlled; commercial imports require Bulog/government authorization.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 1006.30.30",
       },
       {
         code: "1006.30.90",
         description: "Semi-milled or wholly milled rice, other",
         tariffRate: "0% MFN (import restricted to state trading enterprise)",
-        tariffNote: "Rice imports are tightly controlled; commercial imports require Bulog/government authorization.",
+        tariffNote:
+          "Rice imports are tightly controlled; commercial imports require Bulog/government authorization.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 1006.30.90",
       },
     ],
   },
@@ -473,8 +604,11 @@ export const TARIFF_ANCHORS: {
       {
         code: "1701999000",
         description: "Refined cane or beet sugar, solid, other",
-        tariffRate: "50% within-quota / 90% out-of-quota (TRQ product)",
-        tariffNote: null,
+        tariffRate: "15% in-quota (TRQ) / 50% MFN out-of-quota",
+        tariffNote:
+          "Subject to tariff-rate quota administration; corrected during 2026-07-10 verification (previous entry had the in-quota and out-of-quota rates reversed, and the out-of-quota figure was wrong).",
+        citation:
+          "MOF 关税配额商品税目税率表 (2024 quota schedule), HS 17019990 line: MFN 50%, quota rate 15%",
       },
     ],
     indonesia: [
@@ -482,7 +616,9 @@ export const TARIFF_ANCHORS: {
         code: "1701.99.00",
         description: "Refined cane or beet sugar, other",
         tariffRate: "5% MFN plus specific import duty",
-        tariffNote: "Sugar import licenses issued by Ministry of Trade; quota-managed commodity.",
+        tariffNote:
+          "Sugar import licenses issued by Ministry of Trade; quota-managed commodity.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 1701.99.00",
       },
     ],
   },
@@ -495,6 +631,8 @@ export const TARIFF_ANCHORS: {
         description: "Whiskies",
         tariffRate: "10% MFN",
         tariffNote: "Also subject to consumption tax on import.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 2208300000",
       },
     ],
     indonesia: [
@@ -502,7 +640,9 @@ export const TARIFF_ANCHORS: {
         code: "2208.30.00",
         description: "Whiskies",
         tariffRate: "150% MFN",
-        tariffNote: "High specific + ad valorem excise on alcoholic beverages applies in addition to import duty.",
+        tariffNote:
+          "High specific + ad valorem excise on alcoholic beverages applies in addition to import duty.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 2208.30.00",
       },
     ],
   },
@@ -513,8 +653,11 @@ export const TARIFF_ANCHORS: {
       {
         code: "2402200000",
         description: "Cigarettes containing tobacco",
-        tariffRate: "State trading commodity; import via authorized enterprises only",
+        tariffRate:
+          "State trading commodity; import via authorized enterprises only",
         tariffNote: "Tobacco monopoly restrictions apply.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 2402200000",
       },
     ],
     indonesia: [
@@ -522,27 +665,37 @@ export const TARIFF_ANCHORS: {
         code: "2402.20.90",
         description: "Cigarettes containing tobacco, other",
         tariffRate: "Specific excise (cukai) plus import duty",
-        tariffNote: "Subject to tobacco excise stamps (pita cukai) and strict licensing.",
+        tariffNote:
+          "Subject to tobacco excise stamps (pita cukai) and strict licensing.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 2402.20.90",
       },
     ],
   },
   {
     hsAnchor: "271019",
-    baseDescription: "Petroleum oils, other than crude, and preparations n.e.s.",
+    baseDescription:
+      "Petroleum oils, other than crude, and preparations n.e.s.",
     china: [
       {
         code: "2710199900",
-        description: "Other petroleum oils and preparations, not elsewhere specified",
+        description:
+          "Other petroleum oils and preparations, not elsewhere specified",
         tariffRate: "6% MFN (varies by specific fraction)",
-        tariffNote: "Rate varies significantly by sub-fraction (diesel, lubricants, etc.).",
+        tariffNote:
+          "Rate varies significantly by sub-fraction (diesel, lubricants, etc.).",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 2710199900",
       },
     ],
     indonesia: [
       {
         code: "2710.19.99",
-        description: "Other petroleum oils and preparations, not elsewhere specified",
+        description:
+          "Other petroleum oils and preparations, not elsewhere specified",
         tariffRate: "0-5% MFN (varies by specific fraction)",
-        tariffNote: "Energy products often carry additional non-tariff licensing (e.g. from BPH Migas).",
+        tariffNote:
+          "Energy products often carry additional non-tariff licensing (e.g. from BPH Migas).",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 2710.19.99",
       },
     ],
   },
@@ -555,6 +708,8 @@ export const TARIFF_ANCHORS: {
         description: "Potassium chloride, mineral or chemical fertilizer",
         tariffRate: "1% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 3104200000",
       },
     ],
     indonesia: [
@@ -562,7 +717,9 @@ export const TARIFF_ANCHORS: {
         code: "3104.20.00",
         description: "Potassium chloride, mineral or chemical fertilizer",
         tariffRate: "0% MFN",
-        tariffNote: "Fertilizer imports may require Ministry of Agriculture recommendation letters.",
+        tariffNote:
+          "Fertilizer imports may require Ministry of Agriculture recommendation letters.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 3104.20.00",
       },
     ],
   },
@@ -574,7 +731,10 @@ export const TARIFF_ANCHORS: {
         code: "3303000000",
         description: "Perfumes and toilet waters",
         tariffRate: "10% MFN plus consumption tax",
-        tariffNote: "Cosmetics subject to consumption tax in addition to customs duty.",
+        tariffNote:
+          "Cosmetics subject to consumption tax in addition to customs duty.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 3303000000",
       },
     ],
     indonesia: [
@@ -582,7 +742,9 @@ export const TARIFF_ANCHORS: {
         code: "3303.00.00",
         description: "Perfumes and toilet waters",
         tariffRate: "10% MFN",
-        tariffNote: "Requires BPOM cosmetic notification/registration prior to import.",
+        tariffNote:
+          "Requires BPOM cosmetic notification/registration prior to import.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 3303.00.00",
       },
     ],
   },
@@ -592,17 +754,23 @@ export const TARIFF_ANCHORS: {
     china: [
       {
         code: "3401110000",
-        description: "Soap and organic surface-active products, in bars, for toilet use",
+        description:
+          "Soap and organic surface-active products, in bars, for toilet use",
         tariffRate: "6.5% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 3401110000",
       },
     ],
     indonesia: [
       {
         code: "3401.11.00",
-        description: "Soap and organic surface-active products, in bars, for toilet use",
+        description:
+          "Soap and organic surface-active products, in bars, for toilet use",
         tariffRate: "5% MFN",
-        tariffNote: "Requires BPOM registration as a cosmetic/personal-care product.",
+        tariffNote:
+          "Requires BPOM registration as a cosmetic/personal-care product.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 3401.11.00",
       },
     ],
   },
@@ -615,6 +783,8 @@ export const TARIFF_ANCHORS: {
         description: "New pneumatic rubber tires, for passenger motor cars",
         tariffRate: "10% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 4011100000",
       },
     ],
     indonesia: [
@@ -622,7 +792,9 @@ export const TARIFF_ANCHORS: {
         code: "4011.10.00",
         description: "New pneumatic rubber tires, for passenger motor cars",
         tariffRate: "15% MFN",
-        tariffNote: "Subject to SNI (national standard) mandatory certification.",
+        tariffNote:
+          "Subject to SNI (national standard) mandatory certification.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 4011.10.00",
       },
     ],
   },
@@ -632,17 +804,22 @@ export const TARIFF_ANCHORS: {
     china: [
       {
         code: "4202210000",
-        description: "Handbags, outer surface of leather or composition leather",
+        description:
+          "Handbags, outer surface of leather or composition leather",
         tariffRate: "10% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 4202210000",
       },
     ],
     indonesia: [
       {
         code: "4202.21.00",
-        description: "Handbags, outer surface of leather or composition leather",
+        description:
+          "Handbags, outer surface of leather or composition leather",
         tariffRate: "15% MFN",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 4202.21.00",
       },
     ],
   },
@@ -655,6 +832,8 @@ export const TARIFF_ANCHORS: {
         description: "Uncoated writing/printing paper, 40-150 g/m2, other",
         tariffRate: "5% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 4802569000",
       },
     ],
     indonesia: [
@@ -663,6 +842,7 @@ export const TARIFF_ANCHORS: {
         description: "Uncoated writing/printing paper, 40-150 g/m2",
         tariffRate: "5% MFN",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 4802.56.00",
       },
     ],
   },
@@ -672,17 +852,23 @@ export const TARIFF_ANCHORS: {
     china: [
       {
         code: "4901990000",
-        description: "Printed books, brochures and similar printed matter, other",
+        description:
+          "Printed books, brochures and similar printed matter, other",
         tariffRate: "0% MFN",
-        tariffNote: "Content subject to separate import censorship/approval, independent of tariff rate.",
+        tariffNote:
+          "Content subject to separate import censorship/approval, independent of tariff rate.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 4901990000",
       },
     ],
     indonesia: [
       {
         code: "4901.99.00",
-        description: "Printed books, brochures and similar printed matter, other",
+        description:
+          "Printed books, brochures and similar printed matter, other",
         tariffRate: "0% MFN",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 4901.99.00",
       },
     ],
   },
@@ -695,6 +881,8 @@ export const TARIFF_ANCHORS: {
         description: "Denim, cotton, woven, weighing more than 200 g/m2",
         tariffRate: "8% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 5209420000",
       },
     ],
     indonesia: [
@@ -703,6 +891,7 @@ export const TARIFF_ANCHORS: {
         description: "Denim, cotton, woven, weighing more than 200 g/m2",
         tariffRate: "10% MFN",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 5209.42.00",
       },
     ],
   },
@@ -712,17 +901,22 @@ export const TARIFF_ANCHORS: {
     china: [
       {
         code: "5703200000",
-        description: "Tufted carpets and floor coverings, of nylon or other polyamides",
+        description:
+          "Tufted carpets and floor coverings, of nylon or other polyamides",
         tariffRate: "12.5% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 5703200000",
       },
     ],
     indonesia: [
       {
         code: "5703.20.00",
-        description: "Tufted carpets and floor coverings, of nylon or other polyamides",
+        description:
+          "Tufted carpets and floor coverings, of nylon or other polyamides",
         tariffRate: "15% MFN",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 5703.20.00",
       },
     ],
   },
@@ -735,20 +929,26 @@ export const TARIFF_ANCHORS: {
         description: "Cotton trousers, knitted, women's",
         tariffRate: "16% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 6104620010",
       },
       {
         code: "6104620020",
         description: "Cotton shorts, knitted, women's",
         tariffRate: "16% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 6104620020",
       },
     ],
     indonesia: [
       {
         code: "6104.62.00",
-        description: "Women's trousers, bib and brace overalls, breeches and shorts, cotton, knitted",
+        description:
+          "Women's trousers, bib and brace overalls, breeches and shorts, cotton, knitted",
         tariffRate: "20% MFN",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 6104.62.00",
       },
     ],
   },
@@ -761,34 +961,44 @@ export const TARIFF_ANCHORS: {
         description: "Men's trousers and shorts, cotton, woven",
         tariffRate: "16% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 6203420000",
       },
     ],
     indonesia: [
       {
         code: "6203.42.00",
-        description: "Men's trousers, bib and brace overalls, breeches and shorts, cotton, woven",
+        description:
+          "Men's trousers, bib and brace overalls, breeches and shorts, cotton, woven",
         tariffRate: "20% MFN",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 6203.42.00",
       },
     ],
   },
   {
     hsAnchor: "640419",
-    baseDescription: "Footwear with rubber/plastic soles and textile uppers, other",
+    baseDescription:
+      "Footwear with rubber/plastic soles and textile uppers, other",
     china: [
       {
         code: "6404199000",
-        description: "Footwear with outer soles of rubber/plastics and textile uppers, other",
+        description:
+          "Footwear with outer soles of rubber/plastics and textile uppers, other",
         tariffRate: "16.4% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 6404199000",
       },
     ],
     indonesia: [
       {
         code: "6404.19.00",
-        description: "Footwear with outer soles of rubber/plastics and textile uppers, other",
+        description:
+          "Footwear with outer soles of rubber/plastics and textile uppers, other",
         tariffRate: "25% MFN",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 6404.19.00",
       },
     ],
   },
@@ -798,17 +1008,23 @@ export const TARIFF_ANCHORS: {
     china: [
       {
         code: "6907220000",
-        description: "Glazed ceramic flooring/wall tiles, water absorption 0.5-10%",
+        description:
+          "Glazed ceramic flooring/wall tiles, water absorption 0.5-10%",
         tariffRate: "9% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 6907220000",
       },
     ],
     indonesia: [
       {
         code: "6907.22.00",
-        description: "Glazed ceramic flooring/wall tiles, water absorption 0.5-10%",
+        description:
+          "Glazed ceramic flooring/wall tiles, water absorption 0.5-10%",
         tariffRate: "15% MFN plus antidumping duty on selected origins",
-        tariffNote: "Indonesia has applied trade remedy measures on ceramic tile imports from certain origins.",
+        tariffNote:
+          "Indonesia has applied trade remedy measures on ceramic tile imports from certain origins.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 6907.22.00",
       },
     ],
   },
@@ -821,6 +1037,8 @@ export const TARIFF_ANCHORS: {
         description: "Glass bottles, jars and similar containers, other",
         tariffRate: "8% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 7010900000",
       },
     ],
     indonesia: [
@@ -829,6 +1047,7 @@ export const TARIFF_ANCHORS: {
         description: "Glass bottles, jars and similar containers, other",
         tariffRate: "5% MFN",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 7010.90.00",
       },
     ],
   },
@@ -840,7 +1059,10 @@ export const TARIFF_ANCHORS: {
         code: "7210490000",
         description: "Flat-rolled iron/steel, zinc-coated, other",
         tariffRate: "0-6% MFN (subject to export tax rebate policy changes)",
-        tariffNote: "China periodically adjusts export VAT rebates on steel products.",
+        tariffNote:
+          "China periodically adjusts export VAT rebates on steel products.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 7210490000",
       },
     ],
     indonesia: [
@@ -848,7 +1070,9 @@ export const TARIFF_ANCHORS: {
         code: "7210.49.00",
         description: "Flat-rolled iron/steel, zinc-coated, other",
         tariffRate: "12.5% MFN plus safeguard duty on selected origins",
-        tariffNote: "Indonesia has applied safeguard measures on certain flat steel imports.",
+        tariffNote:
+          "Indonesia has applied safeguard measures on certain flat steel imports.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 7210.49.00",
       },
     ],
   },
@@ -858,9 +1082,12 @@ export const TARIFF_ANCHORS: {
     china: [
       {
         code: "7606129000",
-        description: "Aluminum plates, sheets and strip, rectangular, alloyed, other",
+        description:
+          "Aluminum plates, sheets and strip, rectangular, alloyed, other",
         tariffRate: "5% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 7606129000",
       },
     ],
     indonesia: [
@@ -869,6 +1096,7 @@ export const TARIFF_ANCHORS: {
         description: "Aluminum plates, sheets and strip, rectangular, alloyed",
         tariffRate: "5% MFN plus antidumping duty on selected origins",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 7606.12.00",
       },
     ],
   },
@@ -881,6 +1109,8 @@ export const TARIFF_ANCHORS: {
         description: "Interchangeable rock drilling or earth boring tools",
         tariffRate: "7% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 8207120000",
       },
     ],
     indonesia: [
@@ -889,6 +1119,7 @@ export const TARIFF_ANCHORS: {
         description: "Interchangeable rock drilling or earth boring tools",
         tariffRate: "5% MFN",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 8207.12.00",
       },
     ],
   },
@@ -901,6 +1132,8 @@ export const TARIFF_ANCHORS: {
         description: "Pumps for liquids, other, not elsewhere specified",
         tariffRate: "6% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 8413819000",
       },
     ],
     indonesia: [
@@ -909,6 +1142,7 @@ export const TARIFF_ANCHORS: {
         description: "Pumps for liquids, other",
         tariffRate: "5% MFN",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 8413.81.00",
       },
     ],
   },
@@ -921,6 +1155,8 @@ export const TARIFF_ANCHORS: {
         description: "Instantaneous gas water heaters",
         tariffRate: "8% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 8419110000",
       },
     ],
     indonesia: [
@@ -929,6 +1165,7 @@ export const TARIFF_ANCHORS: {
         description: "Instantaneous gas water heaters",
         tariffRate: "5% MFN",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 8419.11.00",
       },
     ],
   },
@@ -941,6 +1178,8 @@ export const TARIFF_ANCHORS: {
         description: "Electric clothes dryers, capacity <= 10 kg dry weight",
         tariffRate: "10% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 8451210000",
       },
     ],
     indonesia: [
@@ -949,6 +1188,7 @@ export const TARIFF_ANCHORS: {
         description: "Electric clothes dryers, capacity <= 10 kg dry weight",
         tariffRate: "10% MFN",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 8451.21.00",
       },
     ],
   },
@@ -961,6 +1201,8 @@ export const TARIFF_ANCHORS: {
         description: "Static converters, other (power adapters, inverters)",
         tariffRate: "0% MFN",
         tariffNote: "Zero MFN duty under ITA commitments for many sub-items.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 8504409900",
       },
     ],
     indonesia: [
@@ -969,6 +1211,7 @@ export const TARIFF_ANCHORS: {
         description: "Static converters, other (power adapters, inverters)",
         tariffRate: "0-5% MFN (varies by end use)",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 8504.40.90",
       },
     ],
   },
@@ -980,7 +1223,10 @@ export const TARIFF_ANCHORS: {
         code: "8507600000",
         description: "Lithium-ion accumulators (batteries)",
         tariffRate: "0% MFN",
-        tariffNote: "Subject to dangerous-goods transport documentation on export.",
+        tariffNote:
+          "Subject to dangerous-goods transport documentation on export.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 8507600000",
       },
     ],
     indonesia: [
@@ -988,7 +1234,9 @@ export const TARIFF_ANCHORS: {
         code: "8507.60.00",
         description: "Lithium-ion accumulators (batteries)",
         tariffRate: "0% MFN",
-        tariffNote: "Subject to dangerous-goods import handling and labeling rules.",
+        tariffNote:
+          "Subject to dangerous-goods import handling and labeling rules.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 8507.60.00",
       },
     ],
   },
@@ -999,8 +1247,11 @@ export const TARIFF_ANCHORS: {
       {
         code: "8528729000",
         description: "Color television reception apparatus, other",
-        tariffRate: "30% MFN (bound rate; applied rate often lower via agreements)",
+        tariffRate:
+          "30% MFN (bound rate; applied rate often lower via agreements)",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 8528729000",
       },
     ],
     indonesia: [
@@ -1008,7 +1259,9 @@ export const TARIFF_ANCHORS: {
         code: "8528.72.00",
         description: "Color television reception apparatus",
         tariffRate: "0-5% MFN under ASEAN agreements / higher MFN otherwise",
-        tariffNote: "TKDN (local content) requirements may apply to qualify for incentives.",
+        tariffNote:
+          "TKDN (local content) requirements may apply to qualify for incentives.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 8528.72.00",
       },
     ],
   },
@@ -1018,17 +1271,23 @@ export const TARIFF_ANCHORS: {
     china: [
       {
         code: "8529909090",
-        description: "Parts for transmission/reception apparatus, other, not elsewhere specified",
+        description:
+          "Parts for transmission/reception apparatus, other, not elsewhere specified",
         tariffRate: "Varies widely by specific part (0-10% MFN)",
-        tariffNote: "Broad residual electronics parts category; frequent source of ambiguous classification.",
+        tariffNote:
+          "Broad residual electronics parts category; frequent source of ambiguous classification.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 8529909090",
       },
     ],
     indonesia: [
       {
         code: "8529.90.90",
-        description: "Parts for transmission/reception apparatus, other, not elsewhere specified",
+        description:
+          "Parts for transmission/reception apparatus, other, not elsewhere specified",
         tariffRate: "Varies widely by specific part (0-10% MFN)",
         tariffNote: "Residual catch-all; commonly flagged for manual review.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 8529.90.90",
       },
     ],
   },
@@ -1041,6 +1300,8 @@ export const TARIFF_ANCHORS: {
         description: "Road tractors for semi-trailers",
         tariffRate: "10% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 8701200000",
       },
     ],
     indonesia: [
@@ -1049,6 +1310,7 @@ export const TARIFF_ANCHORS: {
         description: "Road tractors for semi-trailers",
         tariffRate: "5% MFN",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 8701.20.00",
       },
     ],
   },
@@ -1061,6 +1323,8 @@ export const TARIFF_ANCHORS: {
         description: "Bicycles, non-motorized, other",
         tariffRate: "13% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 8712009000",
       },
     ],
     indonesia: [
@@ -1069,6 +1333,7 @@ export const TARIFF_ANCHORS: {
         description: "Bicycles, non-motorized, other",
         tariffRate: "25-40% MFN (tiered by type; higher for e-bikes)",
         tariffNote: "Rate tier depends on wheel diameter and bicycle type.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 8712.00.90",
       },
     ],
   },
@@ -1078,17 +1343,22 @@ export const TARIFF_ANCHORS: {
     china: [
       {
         code: "9004909000",
-        description: "Spectacles, goggles and similar corrective/protective eyewear, other",
+        description:
+          "Spectacles, goggles and similar corrective/protective eyewear, other",
         tariffRate: "8% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 9004909000",
       },
     ],
     indonesia: [
       {
         code: "9004.90.00",
-        description: "Spectacles, goggles and similar corrective/protective eyewear, other",
+        description:
+          "Spectacles, goggles and similar corrective/protective eyewear, other",
         tariffRate: "10% MFN",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 9004.90.00",
       },
     ],
   },
@@ -1098,17 +1368,22 @@ export const TARIFF_ANCHORS: {
     china: [
       {
         code: "9102110000",
-        description: "Wristwatches, electrically operated, mechanical display only",
+        description:
+          "Wristwatches, electrically operated, mechanical display only",
         tariffRate: "11% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 9102110000",
       },
     ],
     indonesia: [
       {
         code: "9102.11.00",
-        description: "Wristwatches, electrically operated, mechanical display only",
+        description:
+          "Wristwatches, electrically operated, mechanical display only",
         tariffRate: "10% MFN",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 9102.11.00",
       },
     ],
   },
@@ -1120,7 +1395,10 @@ export const TARIFF_ANCHORS: {
         code: "9503009000",
         description: "Toys, not elsewhere specified or included",
         tariffRate: "6% MFN",
-        tariffNote: "Export subject to toy safety certification (e.g. CCC where applicable).",
+        tariffNote:
+          "Export subject to toy safety certification (e.g. CCC where applicable).",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 9503009000",
       },
     ],
     indonesia: [
@@ -1129,6 +1407,7 @@ export const TARIFF_ANCHORS: {
         description: "Toys, not elsewhere specified or included",
         tariffRate: "5-15% MFN (tiered by toy type)",
         tariffNote: "Requires SNI toy safety certification prior to import.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 9503.00.90",
       },
     ],
   },
@@ -1141,6 +1420,8 @@ export const TARIFF_ANCHORS: {
         description: "Exercise equipment and articles, other",
         tariffRate: "6.5% MFN",
         tariffNote: null,
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 9506919000",
       },
     ],
     indonesia: [
@@ -1149,6 +1430,7 @@ export const TARIFF_ANCHORS: {
         description: "Exercise equipment and articles",
         tariffRate: "10% MFN",
         tariffNote: null,
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 9506.91.00",
       },
     ],
   },

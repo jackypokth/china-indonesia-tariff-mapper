@@ -433,10 +433,12 @@ function ResultCard({ match, rank }: { match: TariffSearchResult['matches'][0], 
           )}
         </div>
 
-        <div className="grid grid-cols-3 gap-2 mb-4">
+        <div className="grid grid-cols-5 gap-2 mb-4">
           {([
-            ['HS anchor', match.reasoning.hs_anchor_strength],
-            ['Description', match.reasoning.description_compatibility],
+            ['Product type', match.reasoning.product_type_match],
+            ['Function', match.reasoning.function_match],
+            ['Attributes', match.reasoning.attribute_match],
+            ['Text similarity', match.reasoning.text_semantic_similarity],
             ['Nat. extension', match.reasoning.national_extension_specificity],
           ] as const).map(([label, value]) => (
             <div key={label} className="bg-background border rounded p-2 text-center">
@@ -446,7 +448,16 @@ function ResultCard({ match, rank }: { match: TariffSearchResult['matches'][0], 
           ))}
         </div>
 
-        <div className="mt-auto pt-4 border-t border-dashed">
+        {match.reasoning.conflicts.length > 0 && (
+          <div className="mb-4 bg-destructive/10 border border-destructive/30 rounded p-3">
+            <div className="text-[10px] uppercase font-bold text-destructive mb-1 tracking-wider">Conflict detected</div>
+            {match.reasoning.conflicts.map((c, i) => (
+              <p key={i} className="text-sm text-destructive/90">{c}</p>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-auto pt-4 border-t border-dashed space-y-3">
           <div className="flex items-start gap-2">
             <div className="mt-0.5 w-5 h-5 shrink-0 flex items-center justify-center rounded-full bg-secondary text-secondary-foreground">
               <CheckCircle className="w-3 h-3" />
@@ -460,6 +471,12 @@ function ResultCard({ match, rank }: { match: TariffSearchResult['matches'][0], 
               </p>
             </div>
           </div>
+          {match.reasoning.ambiguity_note && (
+            <p className="text-xs text-muted-foreground italic pl-7">{match.reasoning.ambiguity_note}</p>
+          )}
+          {match.reasoning.tariff_commentary && (
+            <p className="text-xs text-muted-foreground italic pl-7">{match.reasoning.tariff_commentary}</p>
+          )}
         </div>
       </div>
     </div>

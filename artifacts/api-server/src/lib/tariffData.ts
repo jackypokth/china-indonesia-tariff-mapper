@@ -1124,6 +1124,56 @@ export const TARIFF_ANCHORS: {
     ],
   },
   {
+    hsAnchor: "821191",
+    baseDescription: "Table knives having fixed blades, and other knives (excl. rock-drilling tools)",
+    china: [
+      {
+        code: "8211910000",
+        description:
+          "Table knives having fixed blades, incl. boxed kitchen/cutlery knife sets",
+        tariffRate: "10% MFN",
+        tariffNote: "Boxed retail sets remain classified under the knife heading, not as generic household articles.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 8211910000",
+      },
+    ],
+    indonesia: [
+      {
+        code: "8211.91.00",
+        description:
+          "Table knives having fixed blades, including stainless-steel kitchen knife sets",
+        tariffRate: "10% MFN",
+        tariffNote: "Boxed retail sets remain classified under the knife heading, not as generic household articles.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 8211.91.00",
+      },
+    ],
+  },
+  {
+    hsAnchor: "732393",
+    baseDescription: "Table, kitchen or other household articles of stainless steel",
+    china: [
+      {
+        code: "7323930000",
+        description:
+          "Table, kitchen or other household articles of stainless steel, other than knives (e.g. bowls, pots, trays)",
+        tariffRate: "8% MFN",
+        tariffNote: "Generic base-metal household-article heading; excludes cutlery/knives, which fall under 8211.",
+        citation:
+          "China Customs Tariff Commission MFN Schedule (annual adjustment, most recently 2024), HS 7323930000",
+      },
+    ],
+    indonesia: [
+      {
+        code: "7323.93.00",
+        description:
+          "Table, kitchen or other household articles of stainless steel, other than knives",
+        tariffRate: "10% MFN",
+        tariffNote: "Generic base-metal household-article heading; excludes cutlery/knives, which fall under 8211.",
+        citation: "Indonesia BTKI 2022 (PMK 26/PMK.010/2022), HS 7323.93.00",
+      },
+    ],
+  },
+  {
     hsAnchor: "841381",
     baseDescription: "Pumps for liquids, other",
     china: [

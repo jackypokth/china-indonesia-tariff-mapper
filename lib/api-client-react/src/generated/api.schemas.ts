@@ -112,28 +112,47 @@ export const TariffStatus = {
 } as const;
 
 /**
- * Transparent breakdown of the weighted, classification-only confidence formula: 0.50 * hs_anchor_strength + 0.30 * description_compatibility + 0.20 * national_extension_specificity. Deliberately excludes any tariff-source verification signal — that is surfaced separately via `tariff_status` / `source_status` on the match.
+ * Transparent breakdown of the attribute-first, hierarchical confidence formula: 0.40 * product_type_match + 0.25 * function_match + 0.15 * attribute_match + 0.10 * text_semantic_similarity + 0.10 * national_extension_specificity. Product type and primary function dominate on purpose so a broad, generic heading cannot outrank a narrower, product-type-correct heading merely by sharing more literal words (material/use) with the query. Deliberately excludes any tariff-source verification signal — that is surfaced separately via `tariff_status` / `source_status` on the match.
  */
 export interface MatchReasoning {
   /**
-     * 1.0 for an exact valid code resolving to an HS6 heading, 0.85 for a strong description-to-HS6 match, lower for fuzzy/prefix matches.
+     * How well the candidate's product type matches the query's primary product type.
      * @minimum 0
      * @maximum 1
      */
-  hs_anchor_strength: number;
+  product_type_match: number;
   /**
+     * How well the candidate's primary function matches the query's.
      * @minimum 0
      * @maximum 1
      */
-  description_compatibility: number;
+  function_match: number;
+  /**
+     * Support from material/use/other supporting attributes — never dominant on its own.
+     * @minimum 0
+     * @maximum 1
+     */
+  attribute_match: number;
+  /**
+     * Raw lexical/semantic text overlap between the query and the candidate description.
+     * @minimum 0
+     * @maximum 1
+     */
+  text_semantic_similarity: number;
   /**
      * 1.0 only if exactly one target national line is uniquely supported; lower when several national extensions exist.
      * @minimum 0
      * @maximum 1
      */
   national_extension_specificity: number;
-  /** Human-readable summary generated only from the three components above. */
+  /** Non-empty when this candidate's product type/function conflicts with a more specific, positively-matched product family — in which case match_confidence is capped at 0.39. */
+  conflicts: string[];
+  /** 1-2 sentence wording-layer summary (GPT-controlled, evidence-only, or a deterministic template fallback) generated only for the final top-5 candidates. */
   explanation: string;
+  /** Wording-layer note on national-extension or cross-candidate ambiguity, when present. */
+  ambiguity_note: string;
+  /** Wording-layer note on tariff-data availability only; never states a rate unless one is on file. */
+  tariff_commentary: string;
 }
 
 export interface TariffMatch {

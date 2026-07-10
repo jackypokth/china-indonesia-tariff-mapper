@@ -36,11 +36,17 @@ export const searchTariffMatchesResponseCandidateMarginMax = 1;
 export const searchTariffMatchesResponseMatchesItemMatchConfidenceMin = 0;
 export const searchTariffMatchesResponseMatchesItemMatchConfidenceMax = 1;
 
-export const searchTariffMatchesResponseMatchesItemReasoningHsAnchorStrengthMin = 0;
-export const searchTariffMatchesResponseMatchesItemReasoningHsAnchorStrengthMax = 1;
+export const searchTariffMatchesResponseMatchesItemReasoningProductTypeMatchMin = 0;
+export const searchTariffMatchesResponseMatchesItemReasoningProductTypeMatchMax = 1;
 
-export const searchTariffMatchesResponseMatchesItemReasoningDescriptionCompatibilityMin = 0;
-export const searchTariffMatchesResponseMatchesItemReasoningDescriptionCompatibilityMax = 1;
+export const searchTariffMatchesResponseMatchesItemReasoningFunctionMatchMin = 0;
+export const searchTariffMatchesResponseMatchesItemReasoningFunctionMatchMax = 1;
+
+export const searchTariffMatchesResponseMatchesItemReasoningAttributeMatchMin = 0;
+export const searchTariffMatchesResponseMatchesItemReasoningAttributeMatchMax = 1;
+
+export const searchTariffMatchesResponseMatchesItemReasoningTextSemanticSimilarityMin = 0;
+export const searchTariffMatchesResponseMatchesItemReasoningTextSemanticSimilarityMax = 1;
 
 export const searchTariffMatchesResponseMatchesItemReasoningNationalExtensionSpecificityMin = 0;
 export const searchTariffMatchesResponseMatchesItemReasoningNationalExtensionSpecificityMax = 1;
@@ -70,11 +76,16 @@ export const SearchTariffMatchesResponse = zod.object({
   "match_label": zod.enum(['exact_match', 'likely_match', 'partial_match', 'manual_review_required']),
   "manual_review_required": zod.boolean().describe('True only when classification evidence itself is ambiguous or insufficient (no credible anchor, competing anchors, competing target candidates, or a national extension requiring an absent attribute). Never true merely because a tariff rate is pending or a source row is unverified.\n'),
   "reasoning": zod.object({
-  "hs_anchor_strength": zod.number().min(searchTariffMatchesResponseMatchesItemReasoningHsAnchorStrengthMin).max(searchTariffMatchesResponseMatchesItemReasoningHsAnchorStrengthMax).describe('1.0 for an exact valid code resolving to an HS6 heading, 0.85 for a strong description-to-HS6 match, lower for fuzzy\/prefix matches.\n'),
-  "description_compatibility": zod.number().min(searchTariffMatchesResponseMatchesItemReasoningDescriptionCompatibilityMin).max(searchTariffMatchesResponseMatchesItemReasoningDescriptionCompatibilityMax),
+  "product_type_match": zod.number().min(searchTariffMatchesResponseMatchesItemReasoningProductTypeMatchMin).max(searchTariffMatchesResponseMatchesItemReasoningProductTypeMatchMax).describe('How well the candidate\'s product type matches the query\'s primary product type.'),
+  "function_match": zod.number().min(searchTariffMatchesResponseMatchesItemReasoningFunctionMatchMin).max(searchTariffMatchesResponseMatchesItemReasoningFunctionMatchMax).describe('How well the candidate\'s primary function matches the query\'s.'),
+  "attribute_match": zod.number().min(searchTariffMatchesResponseMatchesItemReasoningAttributeMatchMin).max(searchTariffMatchesResponseMatchesItemReasoningAttributeMatchMax).describe('Support from material\/use\/other supporting attributes — never dominant on its own.'),
+  "text_semantic_similarity": zod.number().min(searchTariffMatchesResponseMatchesItemReasoningTextSemanticSimilarityMin).max(searchTariffMatchesResponseMatchesItemReasoningTextSemanticSimilarityMax).describe('Raw lexical\/semantic text overlap between the query and the candidate description.'),
   "national_extension_specificity": zod.number().min(searchTariffMatchesResponseMatchesItemReasoningNationalExtensionSpecificityMin).max(searchTariffMatchesResponseMatchesItemReasoningNationalExtensionSpecificityMax).describe('1.0 only if exactly one target national line is uniquely supported; lower when several national extensions exist.\n'),
-  "explanation": zod.string().describe('Human-readable summary generated only from the three components above.')
-}).describe('Transparent breakdown of the weighted, classification-only confidence formula: 0.50 \* hs_anchor_strength + 0.30 \* description_compatibility + 0.20 \* national_extension_specificity. Deliberately excludes any tariff-source verification signal — that is surfaced separately via `tariff_status` \/ `source_status` on the match.\n'),
+  "conflicts": zod.array(zod.string()).describe('Non-empty when this candidate\'s product type\/function conflicts with a more specific, positively-matched product family — in which case match_confidence is capped at 0.39.\n'),
+  "explanation": zod.string().describe('1-2 sentence wording-layer summary (GPT-controlled, evidence-only, or a deterministic template fallback) generated only for the final top-5 candidates.\n'),
+  "ambiguity_note": zod.string().describe('Wording-layer note on national-extension or cross-candidate ambiguity, when present.'),
+  "tariff_commentary": zod.string().describe('Wording-layer note on tariff-data availability only; never states a rate unless one is on file.')
+}).describe('Transparent breakdown of the attribute-first, hierarchical confidence formula: 0.40 \* product_type_match + 0.25 \* function_match + 0.15 \* attribute_match + 0.10 \* text_semantic_similarity + 0.10 \* national_extension_specificity. Product type and primary function dominate on purpose so a broad, generic heading cannot outrank a narrower, product-type-correct heading merely by sharing more literal words (material\/use) with the query. Deliberately excludes any tariff-source verification signal — that is surfaced separately via `tariff_status` \/ `source_status` on the match.\n'),
   "tariff_rate": zod.string().nullable().describe('Real rate string from a verified dataset row, or null when no verified row stores one. Never a placeholder numeric rate.\n'),
   "tariff_note": zod.string().nullable(),
   "tariff_status": zod.enum(['available', 'not available in current source data', 'not applicable']).describe('Whether a real, sourced tariff rate can be displayed for this candidate.'),

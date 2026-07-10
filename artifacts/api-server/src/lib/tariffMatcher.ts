@@ -339,6 +339,17 @@ async function identifyAnchor(
   else if (chosen.fusedScore >= 0.35) hsAnchorStrength = 0.65;
   else hsAnchorStrength = 0.45;
 
+  // Anchor-selection ambiguity (a near-tied competing anchor in retrieval)
+  // is itself classification evidence about how strongly the query pins
+  // down THIS anchor — so it belongs inside hsAnchorStrength, not as a
+  // separate blanket "force manual review" flag. Folding it into the score
+  // this way means it still surfaces (lower confidence -> possibly a lower
+  // match_label, and a smaller candidate_margin/higher ambiguity_level if
+  // the competing anchor's own candidates make it into the result set) even
+  // in the edge case where the competing anchor doesn't survive far enough
+  // downstream to appear in the final `matches` list itself.
+  if (multiplePlausibleAnchors) hsAnchorStrength = clamp01(hsAnchorStrength - 0.15);
+
   return {
     anchor: chosen.hsAnchor,
     comparisonText: query,
@@ -420,19 +431,105 @@ function ambiguityLevelFor(topScore: number, margin: number, candidateCount: num
   return "high";
 }
 
+/** Split an attribute option label (e.g. "wireless / Bluetooth") into
+ * lowercase keyword tokens usable for free-text detection. */
+function attributeOptionKeywords(optionLabel: string): string[] {
+  return optionLabel
+    .toLowerCase()
+    .split(/[/,]/)
+    .flatMap((part) => part.trim().split(/\s+/))
+    .map((word) => word.replace(/[^a-z0-9%]/g, ""))
+    .filter((word) => word.length > 2 && !["and", "the", "for", "use"].includes(word));
+}
+
+/** Word-boundary-safe substring test — plain `.includes` would let "men"
+ * false-positive-match inside "women", or "wire" inside a longer unrelated
+ * word. Keywords are matched only as whole words. */
+function containsKeyword(text: string, keyword: string): boolean {
+  return new RegExp(`(?:^|[^a-z0-9])${keyword}(?:[^a-z0-9]|$)`, "i").test(text);
+}
+
+interface AttributeSignal {
+  matchedOption: string;
+  keywords: string[];
+  otherKeywords: string[];
+}
+
+/**
+ * For a classification rule, detect which attributes the raw query text
+ * already pins down unambiguously — exactly one option's keywords appear,
+ * and no other option's keywords for that same attribute do. Used to:
+ *   (a) avoid re-asking a question the user already answered in free text,
+ *   (b) reward/penalize candidate descriptions that agree/disagree with the
+ *       detected value — a targeted contradiction signal that plain
+ *       word-overlap similarity misses entirely (e.g. "wired" and
+ *       "wireless" share zero overlapping tokens with each other despite
+ *       being direct opposites).
+ */
+function detectAttributeSignals(
+  queryLower: string,
+  rule: ClassificationRule,
+): Map<string, AttributeSignal> {
+  const signals = new Map<string, AttributeSignal>();
+  for (const attr of rule.requiredAttributes) {
+    const options = rule.attributeOptions[attr] ?? [];
+    if (options.length < 2) continue;
+    const matchedOptions = options.filter((opt) =>
+      attributeOptionKeywords(opt).some((kw) => containsKeyword(queryLower, kw)),
+    );
+    if (matchedOptions.length !== 1) continue; // no signal, or the query itself is ambiguous
+    const matchedOption = matchedOptions[0];
+    signals.set(attr, {
+      matchedOption,
+      keywords: attributeOptionKeywords(matchedOption),
+      otherKeywords: options
+        .filter((opt) => opt !== matchedOption)
+        .flatMap((opt) => attributeOptionKeywords(opt)),
+    });
+  }
+  return signals;
+}
+
+/** Bonus/penalty applied to description_compatibility for a single
+ * candidate, based on whether its description text agrees or contradicts
+ * the attribute values the query already signaled (see detectAttributeSignals).
+ * Never applied when the query gave no signal for an attribute. */
+function attributeCompatibilityAdjustment(
+  entryDescriptionLower: string,
+  signals: Map<string, AttributeSignal>,
+): number {
+  let adjustment = 0;
+  for (const { keywords, otherKeywords } of signals.values()) {
+    const matchesChosen = keywords.some((kw) => containsKeyword(entryDescriptionLower, kw));
+    const matchesOther = otherKeywords.some((kw) => containsKeyword(entryDescriptionLower, kw));
+    if (matchesChosen && !matchesOther) adjustment += 0.25;
+    else if (matchesOther && !matchesChosen) adjustment -= 0.3;
+  }
+  return adjustment;
+}
+
 /** Attributes that would distinguish the top two candidates, sourced from
  * the classification_rules table for the top anchor when covered, else a
- * generic fallback used only while genuinely ambiguous. */
+ * generic fallback used only while genuinely ambiguous. Attributes the query
+ * already answers unambiguously (per `answeredAttributes`) are excluded —
+ * the panel should never re-ask a question the free-text query already
+ * settled. */
 function requiredAttributesFor(params: {
   ambiguityLevel: AmbiguityLevel;
   topAnchor: string | null;
   topDescriptionCompatibility: number;
+  answeredAttributes: Set<string>;
 }): { rule: ClassificationRule | null; attributes: string[] } {
-  const { ambiguityLevel, topAnchor, topDescriptionCompatibility } = params;
+  const { ambiguityLevel, topAnchor, topDescriptionCompatibility, answeredAttributes } = params;
   if (ambiguityLevel === "low") return { rule: null, attributes: [] };
 
   const rule = findRuleForAnchor(topAnchor);
-  if (rule) return { rule, attributes: rule.requiredAttributes };
+  if (rule) {
+    return {
+      rule,
+      attributes: rule.requiredAttributes.filter((attr) => !answeredAttributes.has(attr)),
+    };
+  }
 
   // No demo rule covers this anchor — fall back to a generic hint set, but
   // only when there's genuine reason to ask (medium/high ambiguity or a weak
@@ -453,7 +550,7 @@ export async function searchTariffMatches(
   const targetCountry = targetCountryFor(direction);
 
   const anchorResolution = await identifyAnchor(query, queryType, sourceCountry);
-  const { anchor, hsAnchorStrength, comparisonText, sourceResolutionVerified, multiplePlausibleAnchors, invalidOrNotFound } =
+  const { anchor, hsAnchorStrength, comparisonText, sourceResolutionVerified, invalidOrNotFound } =
     anchorResolution;
 
   if (!anchor) {
@@ -491,10 +588,14 @@ export async function searchTariffMatches(
     : 1;
 
   const candidates: TariffMatch[] = [];
+  const queryLower = query.toLowerCase();
+  const primaryRule = findRuleForAnchor(anchor);
+  const primarySignals = primaryRule ? detectAttributeSignals(queryLower, primaryRule) : new Map();
 
   for (const entry of targetEntries) {
     const descriptionCompatibility = clamp01(
-      jaccardSimilarity(tokenize(comparisonText), tokenize(entry.description)),
+      jaccardSimilarity(tokenize(comparisonText), tokenize(entry.description)) +
+        attributeCompatibilityAdjustment(entry.description.toLowerCase(), primarySignals),
     );
 
     const confidence = clamp01(
@@ -515,14 +616,17 @@ export async function searchTariffMatches(
     };
 
     // Manual review is driven ONLY by classification ambiguity — never by
-    // tariff-rate or source-verification completeness. A multi-line anchor
-    // only counts as ambiguous when nothing in the input distinguishes the
-    // candidates (i.e. description compatibility is too weak to pick a
-    // clear winner among them) — a specific, well-matched description can
-    // still land on a single confident candidate.
-    const extensionAmbiguityUnresolved = isAmbiguous && descriptionCompatibility < 0.7;
-    const manual_review_required =
-      matchLabel === "manual_review_required" || extensionAmbiguityUnresolved || multiplePlausibleAnchors;
+    // tariff-rate or source-verification completeness. Whether ambiguity
+    // (either between sibling national lines, or between competing anchor
+    // candidates from retrieval) is actually *unresolved* is a
+    // cross-candidate question — is there a clear winner overall? — so it is
+    // decided once, after ALL candidates (including cross-anchor ones) are
+    // scored and sorted, via candidate_margin/ambiguity_level below. A
+    // single candidate's own label/compatibility score in isolation must
+    // never force manual review just because a sibling or a weaker
+    // alternative anchor also exists — that would flag a clearly-winning
+    // top candidate for no real reason.
+    const manual_review_required = matchLabel === "manual_review_required";
 
     candidates.push({
       matched_code: entry.code,
@@ -562,7 +666,13 @@ export async function searchTariffMatches(
 
   for (const { entry, score } of scored) {
     if (candidates.length >= 5) break;
-    const descriptionCompatibility = clamp01(score);
+    const secondaryRule = findRuleForAnchor(entry.hsAnchor);
+    const secondarySignals = secondaryRule
+      ? detectAttributeSignals(queryLower, secondaryRule)
+      : new Map();
+    const descriptionCompatibility = clamp01(
+      score + attributeCompatibilityAdjustment(entry.description.toLowerCase(), secondarySignals),
+    );
     // Secondary candidates don't share the resolved anchor, so their anchor
     // strength is inherently weaker — a fuzzy signal, never full strength.
     const secondaryAnchorStrength = clamp01(hsAnchorStrength * 0.5);
@@ -629,10 +739,17 @@ export async function searchTariffMatches(
     matches[1].manual_review_required = true;
   }
 
+  const topAnchor = matches[0]?.hs6_anchor ?? null;
+  const topRule = findRuleForAnchor(topAnchor);
+  const topAnsweredAttributes = new Set(
+    topRule ? detectAttributeSignals(queryLower, topRule).keys() : [],
+  );
+
   const { rule, attributes: required_attributes } = requiredAttributesFor({
     ambiguityLevel: ambiguity_level,
-    topAnchor: matches[0]?.hs6_anchor ?? null,
+    topAnchor,
     topDescriptionCompatibility: matches[0]?.reasoning.description_compatibility ?? 0,
+    answeredAttributes: topAnsweredAttributes,
   });
   const attribute_options = rule?.attributeOptions ?? {};
 

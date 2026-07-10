@@ -1,31 +1,34 @@
 /**
- * Illustrative prototype reference dataset for China–Indonesia tariff code
- * crosswalks. This is NOT a live customs feed and must not be treated as
- * legally binding. HS 6-digit anchors are real World Customs Organization
- * headings, spanning ~50 headings across agriculture/food, textiles &
- * footwear, electronics, machinery, chemicals, metals, vehicles, and
- * consumer goods; national extensions and tariff rates below are
- * representative examples assembled for demo purposes, loosely informed by
- * publicly published China customs tariff schedules and Indonesia's
- * BTKI/AHTN structure, and should be reviewed against the official
- * schedules before any real use.
+ * Reference dataset for China–Indonesia tariff code crosswalks. This is NOT a
+ * live customs feed and must not be treated as legally binding.
  *
- * Growing this into a production-grade reference set (the full ~5,000+ HS6
- * headings, with accurate national tariff-line extensions and current
- * rates) requires importing from an authoritative source rather than
- * hand-authoring more entries here — e.g. China's MOFCOM/Customs tariff
- * schedule and Indonesia's official BTKI publication (or a licensed trade
- * data provider covering both). To wire in a real feed:
- *   1. Write an importer that maps the source records into
- *      `TariffCodeEntry[]` (see the shape below) — one entry per national
- *      tariff line, tagged with its 6-digit HS anchor.
- *   2. Replace `buildEntries()`'s in-memory `TARIFF_ANCHORS` construction
- *      with a load from that imported dataset (e.g. a JSON file or a
- *      database table), keeping the same `TariffCodeEntry` shape so
- *      `tariffMatcher.ts` and the API layer require no changes.
- *   3. Update `CHINA_SOURCE` / `INDONESIA_SOURCE` (or set `source`
- *      per-entry) to cite the real publication and date.
+ * The dataset has two layers:
+ *
+ * 1. `HS6_NOMENCLATURE` (src/lib/data/hs6-nomenclature.json) — the full WCO
+ *    Harmonized System 6-digit heading list (~6,900 anchors), imported from
+ *    the UN Comtrade classification reference via
+ *    `scripts/import-hs-nomenclature.ts`. Every anchor in this file is a real
+ *    HS6 heading and description; re-run the script to refresh it.
+ * 2. `TARIFF_ANCHORS` below — curated national extensions with representative
+ *    China/Indonesia tariff lines and rates for a broader set of ~50 anchors
+ *    across agriculture/food, textiles & footwear, electronics, machinery,
+ *    chemicals, metals, vehicles, and consumer goods, loosely informed by
+ *    publicly published China customs tariff schedules and Indonesia's
+ *    BTKI/AHTN structure. These are illustrative examples and should be
+ *    reviewed against the official schedules before any real use.
+ *
+ * `buildEntries()` merges the two: every curated anchor uses its
+ * hand-authored national codes/rates, and every other HS6 heading in the full
+ * nomenclature gets an auto-generated placeholder national entry (no rate
+ * yet, flagged as pending import) so the matcher has full HS6 coverage
+ * instead of a small demo subset.
+ *
+ * To add accurate national rates for more headings, add or edit an entry in
+ * `TARIFF_ANCHORS` — curated anchors always take precedence over the
+ * auto-generated placeholder for the same HS6 code.
  */
+
+import hs6Nomenclature from "./data/hs6-nomenclature.json";
 
 export type Country = "china" | "indonesia";
 
@@ -1141,8 +1144,52 @@ export const TARIFF_ANCHORS: {
   },
 ];
 
+const PENDING_RATE_NOTE =
+  "Anchor imported from the WCO HS nomenclature; no curated national tariff line has been added yet for this heading. Rate pending import from an official schedule — treat as manual review required.";
+
+const HS6_NOMENCLATURE = hs6Nomenclature as [string, string][];
+
+/**
+ * For every HS6 heading in the full nomenclature that doesn't already have a
+ * curated national extension, synthesize a single placeholder national code
+ * per country (HS6 + "00" filler) with no rate, so the anchor is at least
+ * searchable/listable end-to-end. This keeps `tariffMatcher.ts` working
+ * unmodified: it just sees more `TariffCodeEntry` rows to match against.
+ */
+function buildPlaceholderEntries(
+  curatedAnchors: Set<string>,
+): TariffCodeEntry[] {
+  const entries: TariffCodeEntry[] = [];
+  for (const [hsAnchor, description] of HS6_NOMENCLATURE) {
+    if (curatedAnchors.has(hsAnchor)) continue;
+    entries.push({
+      code: `${hsAnchor}0000`,
+      country: "china",
+      hsAnchor,
+      description,
+      tariffRate: null,
+      tariffNote: PENDING_RATE_NOTE,
+      source:
+        "WCO HS nomenclature (anchor only, via UN Comtrade classification reference)",
+    });
+    entries.push({
+      code: `${hsAnchor.slice(0, 4)}.${hsAnchor.slice(4, 6)}.00`,
+      country: "indonesia",
+      hsAnchor,
+      description,
+      tariffRate: null,
+      tariffNote: PENDING_RATE_NOTE,
+      source:
+        "WCO HS nomenclature (anchor only, via UN Comtrade classification reference)",
+    });
+  }
+  return entries;
+}
+
 function buildEntries(): TariffCodeEntry[] {
   const entries: TariffCodeEntry[] = [];
+  const curatedAnchors = new Set(TARIFF_ANCHORS.map((a) => a.hsAnchor));
+
   for (const anchor of TARIFF_ANCHORS) {
     for (const cn of anchor.china) {
       entries.push({
@@ -1161,6 +1208,9 @@ function buildEntries(): TariffCodeEntry[] {
       });
     }
   }
+
+  entries.push(...buildPlaceholderEntries(curatedAnchors));
+
   return entries;
 }
 

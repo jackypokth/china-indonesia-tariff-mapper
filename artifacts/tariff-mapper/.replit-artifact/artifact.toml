@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "China–Indonesia Tariff Mapper"
+version = "1.0.0"
+id = "artifacts/tariff-mapper"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22748
+
+[services.development]
+run = "pnpm --filter @workspace/tariff-mapper run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/tariff-mapper", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/tariff-mapper/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22748"
+BASE_PATH = "/"

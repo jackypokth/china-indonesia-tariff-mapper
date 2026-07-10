@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: tariff
+    description: China–Indonesia tariff code mapping operations
 paths:
   /healthz:
     get:
@@ -24,6 +26,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /tariff/search:
+    post:
+      operationId: searchTariffMatches
+      tags: [tariff]
+      summary: Search cross-country tariff code matches
+      description: >
+        Given a product description, HS code, or local tariff code in one country,
+        returns ranked candidate classifications in the other country.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TariffSearchInput"
+      responses:
+        "200":
+          description: Ranked match results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TariffSearchResult"
+  /tariff/codes:
+    get:
+      operationId: listTariffCodes
+      tags: [tariff]
+      summary: List reference tariff codes
+      description: Returns the seeded reference dataset of tariff codes, optionally filtered by country.
+      parameters:
+        - name: country
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/Country"
+      responses:
+        "200":
+          description: List of reference tariff codes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TariffCode"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +77,133 @@ components:
           type: string
       required:
         - status
-
+    Country:
+      type: string
+      enum: [china, indonesia]
+    QueryType:
+      type: string
+      enum: [description, hs_code, local_code]
+    MatchLabel:
+      type: string
+      enum: [exact_match, likely_match, partial_match, manual_review_required]
+    TariffCode:
+      type: object
+      description: A single national tariff code entry, illustrative prototype data only.
+      required:
+        - code
+        - country
+        - hsAnchor
+        - description
+        - tariffRate
+        - tariffNote
+        - source
+      properties:
+        code:
+          type: string
+          description: Full national tariff/customs code (may extend beyond 6 HS digits).
+        country:
+          $ref: "#/components/schemas/Country"
+        hsAnchor:
+          type: string
+          description: The 6-digit HS anchor this code extends.
+        description:
+          type: string
+        tariffRate:
+          type: ["string", "null"]
+          description: Representative tariff rate or indicator, where available.
+        tariffNote:
+          type: ["string", "null"]
+        source:
+          type: string
+          description: Reference/citation for this entry.
+    TariffSearchInput:
+      type: object
+      required:
+        - query
+        - queryType
+        - direction
+      properties:
+        query:
+          type: string
+          minLength: 1
+        queryType:
+          $ref: "#/components/schemas/QueryType"
+        direction:
+          type: string
+          enum: [china_to_indonesia, indonesia_to_china]
+    MatchExplanation:
+      type: object
+      required:
+        - basis
+        - detail
+      properties:
+        basis:
+          type: string
+          enum:
+            - shared_hs_digits
+            - semantic_description_similarity
+            - tariff_book_structure
+            - exact_code_lookup
+        detail:
+          type: string
+    TariffMatch:
+      type: object
+      required:
+        - code
+        - country
+        - description
+        - confidence
+        - matchLabel
+        - explanation
+        - tariffRate
+        - tariffNote
+        - source
+      properties:
+        code:
+          type: string
+        country:
+          $ref: "#/components/schemas/Country"
+        description:
+          type: string
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        matchLabel:
+          $ref: "#/components/schemas/MatchLabel"
+        explanation:
+          $ref: "#/components/schemas/MatchExplanation"
+        tariffRate:
+          type: ["string", "null"]
+        tariffNote:
+          type: ["string", "null"]
+        source:
+          type: string
+    TariffSearchResult:
+      type: object
+      required:
+        - query
+        - queryType
+        - direction
+        - anchorHsCode
+        - manualReviewRequired
+        - matches
+      properties:
+        query:
+          type: string
+        queryType:
+          $ref: "#/components/schemas/QueryType"
+        direction:
+          type: string
+          enum: [china_to_indonesia, indonesia_to_china]
+        anchorHsCode:
+          type: ["string", "null"]
+          description: The nearest HS 6-digit anchor identified for this query, if any.
+        manualReviewRequired:
+          type: boolean
+          description: True when no confident match exists and a human should review.
+        matches:
+          type: array
+          maxItems: 5
+          items:
+            $ref: "#/components/schemas/TariffMatch"

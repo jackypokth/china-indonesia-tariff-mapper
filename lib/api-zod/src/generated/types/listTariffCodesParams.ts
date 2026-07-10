@@ -5,7 +5,8 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { Country } from './country';
 
-export interface HealthStatus {
-  status: string;
-}
+export type ListTariffCodesParams = {
+country?: Country;
+};

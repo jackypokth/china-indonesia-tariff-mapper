@@ -178,14 +178,21 @@ function SearchWorkspace() {
         )}
 
         {searchMutation.isSuccess && searchMutation.data && (
-          <SearchResults result={searchMutation.data} />
+          <SearchResults
+            result={searchMutation.data}
+            onRefine={(details) => {
+              searchMutation.mutate({
+                data: { query: `${query} (${details})`, queryType, direction },
+              });
+            }}
+          />
         )}
       </div>
     </div>
   );
 }
 
-function SearchResults({ result }: { result: TariffSearchResult }) {
+function SearchResults({ result, onRefine }: { result: TariffSearchResult; onRefine: (details: string) => void }) {
   if (result.matches.length === 0) {
     return (
       <div className="p-12 flex flex-col items-center justify-center border rounded-xl bg-card text-center">
@@ -226,14 +233,27 @@ function SearchResults({ result }: { result: TariffSearchResult }) {
         </div>
       </div>
 
-      {result.manualReviewRequired && result.missing_attributes.length > 0 && (
-        <div className="flex items-start gap-2 px-4 py-3 bg-amber-500/5 border border-amber-500/20 rounded-lg text-sm">
-          <Info className="w-4 h-4 mt-0.5 text-amber-600 dark:text-amber-400 shrink-0" />
-          <div>
-            <span className="font-semibold text-foreground">To improve this match, provide:</span>{' '}
-            <span className="text-muted-foreground">{result.missing_attributes.join(', ')}</span>
-          </div>
-        </div>
+      <div className="flex items-center gap-3 flex-wrap text-xs">
+        <Badge variant="outline" className="font-mono">
+          Margin {(result.candidate_margin * 100).toFixed(0)}%
+        </Badge>
+        <Badge
+          variant="outline"
+          className={cn(
+            "uppercase font-bold tracking-wider",
+            result.ambiguity_level === 'low'
+              ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/30 dark:text-emerald-400"
+              : result.ambiguity_level === 'medium'
+              ? "bg-amber-500/10 text-amber-700 border-amber-500/30 dark:text-amber-400"
+              : "bg-red-500/10 text-red-700 border-red-500/30 dark:text-red-400"
+          )}
+        >
+          {result.ambiguity_level} ambiguity
+        </Badge>
+      </div>
+
+      {result.improvement_panel_visible && (
+        <ImprovementPanel result={result} onRefine={onRefine} />
       )}
 
       <div className="grid gap-4">
@@ -241,6 +261,76 @@ function SearchResults({ result }: { result: TariffSearchResult }) {
           <ResultCard key={`${match.matched_code}-${idx}`} match={match} rank={idx + 1} />
         ))}
       </div>
+    </div>
+  );
+}
+
+function ImprovementPanel({ result, onRefine }: { result: TariffSearchResult; onRefine: (details: string) => void }) {
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+
+  const reasons: string[] = [];
+  if (result.manualReviewRequired) reasons.push('classification requires manual review');
+  if (result.ambiguity_level === 'high') reasons.push('top candidates are too close to separate confidently');
+  if (result.required_attributes.length > 0) reasons.push('national-extension-specific attributes are missing');
+
+  const attributes = result.required_attributes;
+
+  return (
+    <div className="border border-amber-500/30 bg-amber-500/5 rounded-xl p-4 space-y-4">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="w-4 h-4 mt-0.5 text-amber-600 dark:text-amber-400 shrink-0" />
+        <div>
+          <div className="font-semibold text-foreground">Improve classification precision</div>
+          <p className="text-sm text-muted-foreground">
+            {reasons.length > 0 ? `Why: ${reasons.join('; ')}.` : 'Provide a few more details to sharpen this result.'}
+          </p>
+        </div>
+      </div>
+
+      {attributes.length > 0 && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {attributes.map((attr) => {
+            const options = result.attribute_options[attr];
+            return (
+              <div key={attr} className="grid gap-1.5">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{attr}</label>
+                {options && options.length > 0 ? (
+                  <Select value={answers[attr] ?? ''} onValueChange={(val) => setAnswers((a) => ({ ...a, [attr]: val }))}>
+                    <SelectTrigger className="h-9 bg-background">
+                      <SelectValue placeholder={`Select ${attr}`} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {options.map((opt) => (
+                        <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    className="h-9 bg-background"
+                    placeholder={`e.g. ${attr}`}
+                    value={answers[attr] ?? ''}
+                    onChange={(e) => setAnswers((a) => ({ ...a, [attr]: e.target.value }))}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <Button
+        size="sm"
+        className="font-semibold"
+        disabled={Object.values(answers).every((v) => !v.trim())}
+        onClick={() => {
+          const details = Object.values(answers).filter((v) => v.trim()).join(', ');
+          if (details) onRefine(details);
+        }}
+        data-testid="btn-refine-classification"
+      >
+        Refine classification
+      </Button>
     </div>
   );
 }
@@ -368,12 +458,6 @@ function ResultCard({ match, rank }: { match: TariffSearchResult['matches'][0], 
               <p className="text-sm text-muted-foreground leading-relaxed">
                 {match.reasoning.explanation}
               </p>
-              {match.missing_attributes.length > 0 && (
-                <p className="text-sm text-muted-foreground mt-1">
-                  <span className="font-semibold text-foreground">To improve this specific match, provide:</span>{' '}
-                  {match.missing_attributes.join(', ')}
-                </p>
-              )}
             </div>
           </div>
         </div>

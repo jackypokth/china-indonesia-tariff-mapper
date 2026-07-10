@@ -5,8 +5,10 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AmbiguityLevel } from './ambiguityLevel';
 import type { QueryType } from './queryType';
 import type { TariffMatch } from './tariffMatch';
+import type { TariffSearchResultAttributeOptions } from './tariffSearchResultAttributeOptions';
 import type { TariffSearchResultDirection } from './tariffSearchResultDirection';
 
 export interface TariffSearchResult {
@@ -20,8 +22,21 @@ export interface TariffSearchResult {
   anchorHsCode: string | null;
   /** Aggregate convenience flag: true when no candidates could be classified at all, or every candidate individually requires manual review. Prefer each match's own `manual_review_required`. */
   manualReviewRequired: boolean;
-  /** Union of every candidate's missing_attributes, for a single top-of-page hint. */
+  /**
+     * top_1.match_confidence - top_2.match_confidence after sorting by match_confidence. 1 when there are fewer than two candidates. Used only as an ambiguity signal, never blended into any candidate's match_confidence.
+     * @minimum 0
+     * @maximum 1
+     */
+  candidate_margin: number;
+  ambiguity_level: AmbiguityLevel;
+  /** Product attributes that would distinguish the top candidates (from the classification_rules table when the top anchor is covered, else a generic fallback). Empty for a clear, high-separation match. */
+  required_attributes: string[];
+  /** Subset of required_attributes not yet supplied via the structured-details form. Equal to required_attributes until answers are merged into the query. */
   missing_attributes: string[];
+  /** Suggested answer options per required attribute, for the structured-details form. */
+  attribute_options: TariffSearchResultAttributeOptions;
+  /** True only when manualReviewRequired is true, OR candidate_margin < 0.08, OR required_attributes is non-empty. Drives the single shared "Improve classification precision" panel; never true for a clear, high-separation match. */
+  improvement_panel_visible: boolean;
   /** @maxItems 5 */
   matches: TariffMatch[];
 }

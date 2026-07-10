@@ -16,7 +16,7 @@ router.post("/tariff/search", async (req, res): Promise<void> => {
   }
 
   const { query, queryType, direction } = parsed.data;
-  const result = searchTariffMatches(query, queryType, direction);
+  const result = await searchTariffMatches(query, queryType, direction);
   res.json(result);
 });
 

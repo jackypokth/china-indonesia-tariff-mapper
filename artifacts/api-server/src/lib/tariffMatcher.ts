@@ -3,6 +3,8 @@ import {
   type Country,
   type TariffCodeEntry,
 } from "./tariffData";
+import { findRuleForAnchor, type ClassificationRule } from "./classificationRules";
+import { hybridRetrieveAnchor, type RetrievedCandidate } from "./hybridRetrieval";
 
 export type QueryType = "description" | "hs_code" | "local_code";
 export type Direction = "china_to_indonesia" | "indonesia_to_china";
@@ -17,6 +19,7 @@ export type SourceStatus =
   | "tariff data pending"
   | "source unavailable";
 export type TariffStatus = "available" | "not available in current source data" | "not applicable";
+export type AmbiguityLevel = "low" | "medium" | "high";
 
 /**
  * Transparent breakdown of the classification-only confidence formula:
@@ -24,11 +27,11 @@ export type TariffStatus = "available" | "not available in current source data" 
  *     0.50 * hs_anchor_strength +
  *     0.30 * description_compatibility +
  *     0.20 * national_extension_specificity
- * This is computed EXCLUSIVELY from classification evidence. It must never be
- * blended with, or capped by, tariff-source verification/completeness — a
- * classification can be 100% certain while the tariff rate itself is still
- * pending import, and the two facts are surfaced through separate fields
- * (`tariff_status` / `source_status`) instead of dragging confidence down.
+ * This is computed EXCLUSIVELY from classification evidence, per-candidate,
+ * and is never normalized or ranked against other candidates, and never
+ * blended with, or capped by, tariff-source verification/completeness.
+ * Cross-candidate ambiguity is instead surfaced separately via
+ * `candidate_margin` / `ambiguity_level` on the search result.
  */
 export interface MatchReasoning {
   hs_anchor_strength: number;
@@ -43,15 +46,15 @@ export interface TariffMatch {
   hs6_anchor: string;
   country: Country;
   description: string;
-  /** Heuristic 0-1 score, NOT an empirically calibrated probability, and NOT
-   * influenced by tariff-source completeness. */
+  /** Absolute, per-candidate heuristic 0-1 score, NOT rank-derived, NOT
+   * normalized against other candidates, and NOT influenced by tariff-source
+   * completeness. */
   match_confidence: number;
   match_label: MatchLabel;
-  /** True only when classification evidence itself is ambiguous/insufficient —
-   * never true merely because a tariff rate hasn't been imported yet. */
+  /** True only when THIS candidate's classification evidence is itself
+   * ambiguous/insufficient — never true merely because a tariff rate hasn't
+   * been imported yet. */
   manual_review_required: boolean;
-  /** Product attributes that would help disambiguate this specific candidate. */
-  missing_attributes: string[];
   reasoning: MatchReasoning;
   /** Real rate string, or null when no verified dataset row stores one. Never
    * a placeholder number. */
@@ -68,11 +71,34 @@ export interface TariffSearchResult {
   direction: Direction;
   anchorHsCode: string | null;
   /** Aggregate convenience flag: true when no candidates could be classified
-   * at all, or every candidate individually requires manual review. Prefer
-   * each match's own `manual_review_required` for per-candidate decisions. */
+   * at all, or every candidate individually requires manual review. */
   manualReviewRequired: boolean;
-  /** Union of every candidate's `missing_attributes`, for a single top-of-page hint. */
+  /** top_1.match_confidence - top_2.match_confidence after sorting by
+   * match_confidence. 1 when there is only one (or zero) candidates — a
+   * single candidate has no competing alternative to be ambiguous against. */
+  candidate_margin: number;
+  /** Derived ONLY from candidate_margin (+ top score) — an ambiguity/review
+   * signal, never a second confidence score:
+   *   margin >= 0.15 and top >= 0.85  -> low  (high separation)
+   *   margin in [0.08, 0.15)          -> medium
+   *   margin < 0.08                   -> high (competing candidates) */
+  ambiguity_level: AmbiguityLevel;
+  /** Product attributes that would distinguish the top candidates, sourced
+   * from the classification_rules table when the top anchor is covered,
+   * else a generic fallback. Empty for clear, unambiguous matches. */
+  required_attributes: string[];
+  /** Subset of required_attributes not yet supplied by the user via the
+   * structured-details form. Equal to required_attributes until answers are
+   * merged into the query. */
   missing_attributes: string[];
+  /** Suggested answer options for each required attribute, for rendering the
+   * structured-details form. */
+  attribute_options: Record<string, string[]>;
+  /** True only when: manualReviewRequired, OR top-two margin < 0.08, OR
+   * required_attributes is non-empty. Never shown for a clear, high-separation
+   * match. Drives the single shared "Improve classification precision" panel —
+   * per-candidate improvement suggestions have been removed. */
+  improvement_panel_visible: boolean;
   matches: TariffMatch[];
 }
 
@@ -176,18 +202,31 @@ interface AnchorResolution {
   /** True when the input code/text could not be resolved to any known
    * classification at all (invalid/not-found code). */
   invalidOrNotFound: boolean;
+  /** Present only for description queries resolved via hybrid retrieval —
+   * surfaced for transparency/debugging, not used in scoring. */
+  retrieval?: {
+    candidates: RetrievedCandidate[];
+    llmSelectedAnchor: string | null;
+    llmRationale: string | null;
+    llmFallbackUsed: boolean;
+  };
 }
 
 /**
- * Identify the most likely HS 6-digit anchor for the given query, searching
- * within the source country's entries first (for hs_code / local_code lookups)
- * and falling back to description similarity across all entries.
+ * Identify the most likely HS 6-digit anchor for the given query.
+ *  - hs_code / local_code: deterministic exact/prefix lookup (unchanged) —
+ *    this is already a retrieval step, just a trivial one.
+ *  - description: hybrid retrieval (BM25 keyword + local semantic score) to
+ *    build a small candidate set, then an LLM selects the best anchor from
+ *    that set only (see hybridRetrieval.ts). Falls back to the top retrieval
+ *    candidate if the LLM is unavailable or hallucinates a code outside the
+ *    candidate set.
  */
-function identifyAnchor(
+async function identifyAnchor(
   query: string,
   queryType: QueryType,
   sourceCountry: Country,
-): AnchorResolution {
+): Promise<AnchorResolution> {
   if (queryType === "hs_code") {
     const digits = normalizeCode(query).replace(/[^0-9]/g, "");
     if (digits.length >= 6) {
@@ -270,56 +309,45 @@ function identifyAnchor(
     };
   }
 
-  // description fallback: score against every entry's description, take the
-  // best anchor, and track the runner-up to detect ambiguous wording.
-  const queryTokens = tokenize(query);
-  const bestByAnchor = new Map<string, { score: number; entry: TariffCodeEntry }>();
-  for (const entry of TARIFF_CODE_ENTRIES) {
-    const score = jaccardSimilarity(queryTokens, tokenize(entry.description));
-    const current = bestByAnchor.get(entry.hsAnchor);
-    if (!current || score > current.score) {
-      bestByAnchor.set(entry.hsAnchor, { score, entry });
-    }
-  }
-  const ranked = [...bestByAnchor.values()].sort((a, b) => b.score - a.score);
-  const best = ranked[0];
-  const runnerUp = ranked[1];
+  // description queries: hybrid retrieval (BM25 + local semantic score) +
+  // LLM anchor selection constrained to the retrieved set.
+  const { candidates, llmSelectedAnchor, llmRationale, llmFallbackUsed } =
+    await hybridRetrieveAnchor(query);
 
-  if (best && best.score > 0.08) {
-    // Ambiguous if a distinct anchor scores nearly as well as the winner.
-    const multiplePlausibleAnchors =
-      !!runnerUp && runnerUp.score > 0 && best.score - runnerUp.score < 0.1;
-    // Tiered anchor strength per spec: 0.85 for a strong description match,
-    // scaled lower for weaker (but still credible) fuzzy matches.
-    let hsAnchorStrength: number;
-    if (best.score >= 0.35) hsAnchorStrength = 0.85;
-    else if (best.score >= 0.2) hsAnchorStrength = 0.65;
-    else hsAnchorStrength = 0.45;
+  if (candidates.length === 0 || !llmSelectedAnchor) {
     return {
-      anchor: best.entry.hsAnchor,
+      anchor: null,
       comparisonText: query,
-      hsAnchorStrength,
+      hsAnchorStrength: 0,
       sourceResolutionVerified: false,
-      multiplePlausibleAnchors,
-      invalidOrNotFound: false,
+      multiplePlausibleAnchors: false,
+      invalidOrNotFound: true,
     };
   }
 
-  return {
-    anchor: null,
-    comparisonText: query,
-    hsAnchorStrength: 0,
-    sourceResolutionVerified: false,
-    multiplePlausibleAnchors: false,
-    invalidOrNotFound: true,
-  };
-}
+  const chosen = candidates.find((c) => c.hsAnchor === llmSelectedAnchor) ?? candidates[0];
+  const runnerUp = candidates.find((c) => c.hsAnchor !== chosen.hsAnchor);
+  // Ambiguous if a distinct retrieved anchor scores nearly as well as the
+  // chosen one in the fused retrieval ranking.
+  const multiplePlausibleAnchors =
+    !!runnerUp && runnerUp.fusedScore > 0 && chosen.fusedScore - runnerUp.fusedScore < 0.1;
 
-/** Is the query text itself too thin to carry much classification signal? */
-function isVagueQuery(query: string, queryType: QueryType): boolean {
-  if (queryType !== "description") return false;
-  const tokens = tokenize(query);
-  return tokens.size < 2;
+  // Tiered anchor strength per spec: 0.85 for a strong retrieval+LLM match,
+  // scaled lower for weaker (but still credible) fused retrieval scores.
+  let hsAnchorStrength: number;
+  if (chosen.fusedScore >= 0.6) hsAnchorStrength = 0.85;
+  else if (chosen.fusedScore >= 0.35) hsAnchorStrength = 0.65;
+  else hsAnchorStrength = 0.45;
+
+  return {
+    anchor: chosen.hsAnchor,
+    comparisonText: query,
+    hsAnchorStrength,
+    sourceResolutionVerified: false,
+    multiplePlausibleAnchors,
+    invalidOrNotFound: false,
+    retrieval: { candidates, llmSelectedAnchor, llmRationale, llmFallbackUsed },
+  };
 }
 
 /** Word tier for a 0-1 reasoning component, used only for human-readable text. */
@@ -363,23 +391,6 @@ function tariffStatusFor(entry: TariffCodeEntry): TariffStatus {
   return entry.verified && entry.tariffRate ? "available" : "not available in current source data";
 }
 
-function missingAttributesFor(params: {
-  isAmbiguous: boolean;
-  descriptionCompatibility: number;
-}): string[] {
-  const { isAmbiguous, descriptionCompatibility } = params;
-  const attrs = new Set<string>();
-  if (isAmbiguous) {
-    attrs.add("intended use");
-    attrs.add("technical specification");
-  }
-  if (descriptionCompatibility < 0.5) {
-    attrs.add("material");
-    attrs.add("technical specification");
-  }
-  return [...attrs];
-}
-
 function labelForMatch(params: {
   confidence: number;
   sourceResolutionVerified: boolean;
@@ -400,16 +411,48 @@ function labelForMatch(params: {
   return "manual_review_required";
 }
 
-export function searchTariffMatches(
+/** Ambiguity level is derived ONLY from candidate_margin (+ the top score) —
+ * it is a review/UX signal, never a second confidence calculation. */
+function ambiguityLevelFor(topScore: number, margin: number, candidateCount: number): AmbiguityLevel {
+  if (candidateCount <= 1) return candidateCount === 0 ? "high" : "low";
+  if (margin >= 0.15 && topScore >= 0.85) return "low";
+  if (margin >= 0.08) return "medium";
+  return "high";
+}
+
+/** Attributes that would distinguish the top two candidates, sourced from
+ * the classification_rules table for the top anchor when covered, else a
+ * generic fallback used only while genuinely ambiguous. */
+function requiredAttributesFor(params: {
+  ambiguityLevel: AmbiguityLevel;
+  topAnchor: string | null;
+  topDescriptionCompatibility: number;
+}): { rule: ClassificationRule | null; attributes: string[] } {
+  const { ambiguityLevel, topAnchor, topDescriptionCompatibility } = params;
+  if (ambiguityLevel === "low") return { rule: null, attributes: [] };
+
+  const rule = findRuleForAnchor(topAnchor);
+  if (rule) return { rule, attributes: rule.requiredAttributes };
+
+  // No demo rule covers this anchor — fall back to a generic hint set, but
+  // only when there's genuine reason to ask (medium/high ambiguity or a weak
+  // description match).
+  if (ambiguityLevel === "high" || topDescriptionCompatibility < 0.5) {
+    return { rule: null, attributes: ["material", "intended use", "technical specification"] };
+  }
+  return { rule: null, attributes: [] };
+}
+
+export async function searchTariffMatches(
   rawQuery: string,
   queryType: QueryType,
   direction: Direction,
-): TariffSearchResult {
+): Promise<TariffSearchResult> {
   const query = rawQuery.trim();
   const sourceCountry = sourceCountryFor(direction);
   const targetCountry = targetCountryFor(direction);
 
-  const anchorResolution = identifyAnchor(query, queryType, sourceCountry);
+  const anchorResolution = await identifyAnchor(query, queryType, sourceCountry);
   const { anchor, hsAnchorStrength, comparisonText, sourceResolutionVerified, multiplePlausibleAnchors, invalidOrNotFound } =
     anchorResolution;
 
@@ -420,9 +463,16 @@ export function searchTariffMatches(
       direction,
       anchorHsCode: null,
       manualReviewRequired: true,
-      missing_attributes: invalidOrNotFound
-        ? []
-        : ["material", "intended use", "technical specification"],
+      // Consistent with the "fewer than two candidates" convention used
+      // elsewhere: no competing alternative exists, so margin is trivially
+      // maximal. ambiguity_level is still forced to "high" here because zero
+      // candidates is itself a hard manual-review trigger, independent of margin.
+      candidate_margin: 1,
+      ambiguity_level: "high",
+      required_attributes: invalidOrNotFound ? [] : ["material", "intended use", "technical specification"],
+      missing_attributes: invalidOrNotFound ? [] : ["material", "intended use", "technical specification"],
+      attribute_options: {},
+      improvement_panel_visible: !invalidOrNotFound,
       matches: [],
     };
   }
@@ -474,11 +524,6 @@ export function searchTariffMatches(
     const manual_review_required =
       matchLabel === "manual_review_required" || extensionAmbiguityUnresolved || multiplePlausibleAnchors;
 
-    const missing_attributes = missingAttributesFor({
-      isAmbiguous: extensionAmbiguityUnresolved,
-      descriptionCompatibility,
-    });
-
     candidates.push({
       matched_code: entry.code,
       hs6_anchor: entry.hsAnchor,
@@ -487,7 +532,6 @@ export function searchTariffMatches(
       match_confidence: Number(confidence.toFixed(2)),
       match_label: matchLabel,
       manual_review_required,
-      missing_attributes,
       reasoning: {
         ...reasoningCore,
         explanation: buildExplanation(reasoningCore, targetEntries.length),
@@ -543,11 +587,6 @@ export function searchTariffMatches(
       national_extension_specificity: Number(secondaryNationalExtensionSpecificity.toFixed(2)),
     };
 
-    const missing_attributes = missingAttributesFor({
-      isAmbiguous: true,
-      descriptionCompatibility,
-    });
-
     candidates.push({
       matched_code: entry.code,
       hs6_anchor: entry.hsAnchor,
@@ -559,7 +598,6 @@ export function searchTariffMatches(
       // weak fuzzy anchor signal is itself a "no credible anchor" trigger —
       // not a blanket true regardless of evidence strength.
       manual_review_required: matchLabel === "manual_review_required" || secondaryAnchorStrength < 0.5,
-      missing_attributes,
       reasoning: {
         ...reasoningCore,
         explanation: buildExplanation(reasoningCore, 2),
@@ -572,18 +610,38 @@ export function searchTariffMatches(
     });
   }
 
+  // Sort by absolute match_confidence — NOT re-normalized, NOT rank-derived.
   candidates.sort((a, b) => b.match_confidence - a.match_confidence);
   const matches = candidates.slice(0, 5);
 
-  // Two close top candidates is itself a classification-ambiguity signal
-  // (requirement #3 of the manual-review trigger list) — flag both.
-  if (matches.length >= 2 && matches[0].match_confidence - matches[1].match_confidence <= 0.08) {
+  const candidate_margin =
+    matches.length >= 2 ? Number((matches[0].match_confidence - matches[1].match_confidence).toFixed(2)) : 1;
+  const ambiguity_level = ambiguityLevelFor(
+    matches[0]?.match_confidence ?? 0,
+    candidate_margin,
+    matches.length,
+  );
+
+  // Close top-two margin is itself a classification-ambiguity signal — flag
+  // both candidates for manual review even if each looked fine alone.
+  if (matches.length >= 2 && ambiguity_level === "high") {
     matches[0].manual_review_required = true;
     matches[1].manual_review_required = true;
   }
 
+  const { rule, attributes: required_attributes } = requiredAttributesFor({
+    ambiguityLevel: ambiguity_level,
+    topAnchor: matches[0]?.hs6_anchor ?? null,
+    topDescriptionCompatibility: matches[0]?.reasoning.description_compatibility ?? 0,
+  });
+  const attribute_options = rule?.attributeOptions ?? {};
+
   const manualReviewRequired = matches.length === 0 || matches.every((m) => m.manual_review_required);
-  const missing_attributes = [...new Set(matches.flatMap((m) => m.missing_attributes))];
+
+  // Item 5: the single shared panel shows only when genuinely warranted —
+  // never for a clear, high-separation match.
+  const improvement_panel_visible =
+    manualReviewRequired || ambiguity_level === "high" || required_attributes.length > 0;
 
   return {
     query,
@@ -591,7 +649,14 @@ export function searchTariffMatches(
     direction,
     anchorHsCode: anchor,
     manualReviewRequired,
-    missing_attributes,
+    candidate_margin,
+    ambiguity_level,
+    required_attributes,
+    // No structured-details answers are merged into this query yet, so
+    // everything required is also currently missing.
+    missing_attributes: required_attributes,
+    attribute_options,
+    improvement_panel_visible,
     matches,
   };
 }

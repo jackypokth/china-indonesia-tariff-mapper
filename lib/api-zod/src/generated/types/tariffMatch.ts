@@ -25,8 +25,6 @@ export interface TariffMatch {
   match_label: MatchLabel;
   /** True only when classification evidence itself is ambiguous or insufficient (no credible anchor, competing anchors, competing target candidates, or a national extension requiring an absent attribute). Never true merely because a tariff rate is pending or a source row is unverified. */
   manual_review_required: boolean;
-  /** Product attributes the user could supply (e.g. material, intended use, technical specification) to sharpen this candidate. */
-  missing_attributes: string[];
   reasoning: MatchReasoning;
   /**
      * Real rate string from a verified dataset row, or null when no verified row stores one. Never a placeholder numeric rate.

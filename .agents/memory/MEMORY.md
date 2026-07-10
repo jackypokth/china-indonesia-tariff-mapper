@@ -1,3 +1,4 @@
 - [Tariff dataset layering](tariff-dataset-layering.md) — full HS6 nomenclature is imported as a base layer; curated national rates overlay it and always take precedence.
 - [Tariff confidence engine](tariff-confidence-engine.md) — match_confidence is a weighted, reasoning-transparent score; exact_match requires a verified single target + high description similarity, never just a clean code lookup.
 - [Tariff rate verification](tariff-rate-verification.md) — TRQ in-quota vs out-of-quota rates are easy to transpose; always cite the specific quota-schedule row and label direction explicitly.
+- [Embeddings proxy limitation](embeddings-proxy-limitation.md) — Replit's managed OpenAI proxy has no embeddings endpoint; substitute local TF-IDF/n-gram cosine + BM25 and flag the deviation to the user.

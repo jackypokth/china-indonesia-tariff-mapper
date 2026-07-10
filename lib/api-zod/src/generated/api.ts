@@ -30,6 +30,9 @@ export const SearchTariffMatchesBody = zod.object({
   "direction": zod.enum(['china_to_indonesia', 'indonesia_to_china'])
 })
 
+export const searchTariffMatchesResponseCandidateMarginMin = 0;
+export const searchTariffMatchesResponseCandidateMarginMax = 1;
+
 export const searchTariffMatchesResponseMatchesItemMatchConfidenceMin = 0;
 export const searchTariffMatchesResponseMatchesItemMatchConfidenceMax = 1;
 
@@ -52,7 +55,12 @@ export const SearchTariffMatchesResponse = zod.object({
   "direction": zod.enum(['china_to_indonesia', 'indonesia_to_china']),
   "anchorHsCode": zod.string().nullable().describe('The nearest HS 6-digit anchor identified for this query, if any.'),
   "manualReviewRequired": zod.boolean().describe('Aggregate convenience flag: true when no candidates could be classified at all, or every candidate individually requires manual review. Prefer each match\'s own `manual_review_required`.\n'),
-  "missing_attributes": zod.array(zod.string()).describe('Union of every candidate\'s missing_attributes, for a single top-of-page hint.'),
+  "candidate_margin": zod.number().min(searchTariffMatchesResponseCandidateMarginMin).max(searchTariffMatchesResponseCandidateMarginMax).describe('top_1.match_confidence - top_2.match_confidence after sorting by match_confidence. 1 when there are fewer than two candidates. Used only as an ambiguity signal, never blended into any candidate\'s match_confidence.\n'),
+  "ambiguity_level": zod.enum(['low', 'medium', 'high']).describe('Derived only from candidate_margin (+ top score), never a second confidence score: low = high separation (margin >= 0.15 and top >= 0.85), medium = margin in [0.08, 0.15), high = competing candidates (margin < 0.08).\n'),
+  "required_attributes": zod.array(zod.string()).describe('Product attributes that would distinguish the top candidates (from the classification_rules table when the top anchor is covered, else a generic fallback). Empty for a clear, high-separation match.\n'),
+  "missing_attributes": zod.array(zod.string()).describe('Subset of required_attributes not yet supplied via the structured-details form. Equal to required_attributes until answers are merged into the query.\n'),
+  "attribute_options": zod.record(zod.string(), zod.array(zod.string())).describe('Suggested answer options per required attribute, for the structured-details form.'),
+  "improvement_panel_visible": zod.boolean().describe('True only when manualReviewRequired is true, OR candidate_margin < 0.08, OR required_attributes is non-empty. Drives the single shared \"Improve classification precision\" panel; never true for a clear, high-separation match.\n'),
   "matches": zod.array(zod.object({
   "matched_code": zod.string(),
   "hs6_anchor": zod.string(),
@@ -61,7 +69,6 @@ export const SearchTariffMatchesResponse = zod.object({
   "match_confidence": zod.number().min(searchTariffMatchesResponseMatchesItemMatchConfidenceMin).max(searchTariffMatchesResponseMatchesItemMatchConfidenceMax).describe('Heuristic 0-1 score composed ONLY of classification evidence (see MatchReasoning). Not an empirically calibrated probability, and never capped or reduced by tariff-source completeness.\n'),
   "match_label": zod.enum(['exact_match', 'likely_match', 'partial_match', 'manual_review_required']),
   "manual_review_required": zod.boolean().describe('True only when classification evidence itself is ambiguous or insufficient (no credible anchor, competing anchors, competing target candidates, or a national extension requiring an absent attribute). Never true merely because a tariff rate is pending or a source row is unverified.\n'),
-  "missing_attributes": zod.array(zod.string()).describe('Product attributes the user could supply (e.g. material, intended use, technical specification) to sharpen this candidate.\n'),
   "reasoning": zod.object({
   "hs_anchor_strength": zod.number().min(searchTariffMatchesResponseMatchesItemReasoningHsAnchorStrengthMin).max(searchTariffMatchesResponseMatchesItemReasoningHsAnchorStrengthMax).describe('1.0 for an exact valid code resolving to an HS6 heading, 0.85 for a strong description-to-HS6 match, lower for fuzzy\/prefix matches.\n'),
   "description_compatibility": zod.number().min(searchTariffMatchesResponseMatchesItemReasoningDescriptionCompatibilityMin).max(searchTariffMatchesResponseMatchesItemReasoningDescriptionCompatibilityMax),

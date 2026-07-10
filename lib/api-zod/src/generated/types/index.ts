@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './ambiguityLevel';
 export * from './country';
 export * from './healthStatus';
 export * from './listTariffCodesParams';
@@ -18,5 +19,6 @@ export * from './tariffMatch';
 export * from './tariffSearchInput';
 export * from './tariffSearchInputDirection';
 export * from './tariffSearchResult';
+export * from './tariffSearchResultAttributeOptions';
 export * from './tariffSearchResultDirection';
 export * from './tariffStatus';

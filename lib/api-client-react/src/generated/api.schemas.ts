@@ -37,6 +37,18 @@ export const MatchLabel = {
 } as const;
 
 /**
+ * Derived only from candidate_margin (+ top score), never a second confidence score: low = high separation (margin >= 0.15 and top >= 0.85), medium = margin in [0.08, 0.15), high = competing candidates (margin < 0.08).
+ */
+export type AmbiguityLevel = typeof AmbiguityLevel[keyof typeof AmbiguityLevel];
+
+
+export const AmbiguityLevel = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
+
+/**
  * A single national tariff code entry, illustrative prototype data only.
  */
 export interface TariffCode {
@@ -138,8 +150,6 @@ export interface TariffMatch {
   match_label: MatchLabel;
   /** True only when classification evidence itself is ambiguous or insufficient (no credible anchor, competing anchors, competing target candidates, or a national extension requiring an absent attribute). Never true merely because a tariff rate is pending or a source row is unverified. */
   manual_review_required: boolean;
-  /** Product attributes the user could supply (e.g. material, intended use, technical specification) to sharpen this candidate. */
-  missing_attributes: string[];
   reasoning: MatchReasoning;
   /**
      * Real rate string from a verified dataset row, or null when no verified row stores one. Never a placeholder numeric rate.
@@ -162,6 +172,11 @@ export const TariffSearchResultDirection = {
   indonesia_to_china: 'indonesia_to_china',
 } as const;
 
+/**
+ * Suggested answer options per required attribute, for the structured-details form.
+ */
+export type TariffSearchResultAttributeOptions = {[key: string]: string[]};
+
 export interface TariffSearchResult {
   query: string;
   queryType: QueryType;
@@ -173,8 +188,21 @@ export interface TariffSearchResult {
   anchorHsCode: string | null;
   /** Aggregate convenience flag: true when no candidates could be classified at all, or every candidate individually requires manual review. Prefer each match's own `manual_review_required`. */
   manualReviewRequired: boolean;
-  /** Union of every candidate's missing_attributes, for a single top-of-page hint. */
+  /**
+     * top_1.match_confidence - top_2.match_confidence after sorting by match_confidence. 1 when there are fewer than two candidates. Used only as an ambiguity signal, never blended into any candidate's match_confidence.
+     * @minimum 0
+     * @maximum 1
+     */
+  candidate_margin: number;
+  ambiguity_level: AmbiguityLevel;
+  /** Product attributes that would distinguish the top candidates (from the classification_rules table when the top anchor is covered, else a generic fallback). Empty for a clear, high-separation match. */
+  required_attributes: string[];
+  /** Subset of required_attributes not yet supplied via the structured-details form. Equal to required_attributes until answers are merged into the query. */
   missing_attributes: string[];
+  /** Suggested answer options per required attribute, for the structured-details form. */
+  attribute_options: TariffSearchResultAttributeOptions;
+  /** True only when manualReviewRequired is true, OR candidate_margin < 0.08, OR required_attributes is non-empty. Drives the single shared "Improve classification precision" panel; never true for a clear, high-separation match. */
+  improvement_panel_visible: boolean;
   /** @maxItems 5 */
   matches: TariffMatch[];
 }

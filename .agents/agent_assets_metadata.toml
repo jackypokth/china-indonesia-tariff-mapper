@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "CxrGubNVb-u9Wqx71y7dK"
+uri = "file://reflection.md"
+type = "text"
+title = "Project Reflection — China–Indonesia Tariff Mapper"

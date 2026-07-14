@@ -46,17 +46,21 @@ Cross-references trade product descriptions (or HS/local tariff codes) between C
    - Exact/prefix code lookups are deterministic.
    - Free-text descriptions go through **hybrid retrieval**: BM25 keyword scoring + a local character n-gram TF-IDF cosine score are fused into a candidate shortlist, then an LLM picks the best anchor from that shortlist only. Any anchor named outside the shortlist is treated as a hallucination and discarded.
 
-3. **Per-candidate scoring** — every national tariff line under the resolved heading gets an absolute, independent `match_confidence`:
+3. **Per-candidate scoring** — every national tariff line under the resolved heading gets an absolute, independent `match_confidence` using an attribute-first, hierarchical formula:
 
    ```
-   match_confidence = 0.50 × hs_anchor_strength
-                     + 0.30 × description_compatibility
-                     + 0.20 × national_extension_specificity
+   match_confidence = 0.40 × product_type_match
+                     + 0.25 × function_match
+                     + 0.15 × attribute_match
+                     + 0.10 × text_semantic_similarity
+                     + 0.10 × national_extension_specificity
    ```
 
-   - `hs_anchor_strength` — certainty of heading-level resolution (1.0 for exact code, ~0.85–0.45 for retrieval-based, reduced for competing headings).
-   - `description_compatibility` — text similarity to the candidate line, adjusted when the query states a distinguishing attribute the candidate agrees with or contradicts.
-   - `national_extension_specificity` — how many sibling national lines share the heading (1.0 for one line, 0.5 for two, 0.35 for three+).
+   - `product_type_match` — whether the query's product type maps to this heading. Weighted highest to prevent material/usage keywords from pulling in adjacent headings (e.g. "stainless steel kitchen knives" must resolve to HS 8211, not the broader HS 7323 even though it shares more words).
+   - `function_match` — whether the candidate's primary function matches the query's stated purpose.
+   - `attribute_match` — supporting signal for distinguishing attributes (material, form, use). Cannot dominate product type or function.
+   - `text_semantic_similarity` — raw text overlap between query and candidate description. Minor signal only.
+   - `national_extension_specificity` — how many sibling national lines share the heading (1.0 for one line, 0.5 for two, 0.35 for three+). Reflects residual guessing needed even after the heading is correct.
 
    This score is **never** rank-normalised against other candidates and **never** blended with tariff-rate or source-verification status.
 

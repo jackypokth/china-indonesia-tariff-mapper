@@ -1,0 +1,48 @@
+Replace full-text description compatibility as the dominant classification signal with an attribute-first, hierarchical scoring workflow.
+
+Problem: A query such as "stainless steel kitchen knives set" can look semantically similar to broad heading 7323 ("stainless-steel table, kitchen and other household articles"), but the more specific knife family 8211 must rank higher. Generic material and use terms must not override product type and primary function.
+
+Implement:
+
+Use an LLM only to extract structured product facts: primary_product_type, primary_function, materials, intended_use, is_retail_set, key_attributes, uncertain_attributes.
+
+Retrieve 5–10 candidate HS6 headings using lexical and semantic retrieval.
+
+Ask the LLM to score only the supplied candidates, returning: product_type_match, function_match, attribute_match, text_semantic_similarity, conflicts, and rationale.
+
+Calculate candidate confidence: 0.40 * product_type_match + 0.25 * function_match + 0.15 * attribute_match + 0.10 * text_semantic_similarity + 0.10 * national_extension_specificity.
+
+Add an exclusion/cap rule: if product type or primary function conflicts with the candidate heading, cap confidence at 0.39 or exclude it.
+
+Add taxonomy fields for demo categories: positive product types, primary functions, supporting attributes, and exclusions.
+
+Regression test: Query "stainless steel kitchen knives set". HS 8211 knife candidate must rank above HS 7323 household stainless-steel article candidate. Explanation must say product type/function drove the ranking; material and kitchen use were supporting signals only.
+
+Add GPT-generated explanations for each of the top-five candidates, but make GPT a controlled wording layer only.
+
+The matching engine must first calculate and store a structured evidence object for every candidate.
+
+Call GPT with the query plus that single evidence object.
+
+GPT must return strict JSON: { "explanation": "", "ambiguity_note": "", "tariff_note": "" }
+
+Prompt GPT to use only supplied evidence. It cannot infer codes, tariff rates, legal status, sources, exclusions, or facts.
+
+Explanation must be 1–2 sentences, concise, non-binding, and reflect:
+
+product type/function evidence;
+supporting attributes;
+conflicts or missing differentiating attributes;
+national-extension ambiguity, when present.
+Generate explanations only for the returned top five candidates.
+
+Validate output before showing it:
+
+no code/rate/source not supplied in evidence;
+no prohibited terms: definitely, guaranteed, official, legally binding;
+if tariff_rate is null, reject any percentage or tariff claim.
+If validation fails or GPT is unavailable, use a deterministic template explanation based on the evidence fields.
+
+Cache responses by normalized query + candidate code + hash of evidence fields.
+
+Keep match confidence, match label, source status, and tariff status computed by the backend. GPT must never set or modify them.

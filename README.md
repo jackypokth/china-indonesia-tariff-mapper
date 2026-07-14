@@ -56,7 +56,7 @@ Cross-references trade product descriptions (or HS/local tariff codes) between C
                      + 0.10 × national_extension_specificity
    ```
 
-   - `product_type_match` — whether the query's product type maps to this heading. Weighted highest to prevent material/usage keywords from pulling in adjacent headings (e.g. "stainless steel kitchen knives" must resolve to HS 8211, not the broader HS 7323 even though it shares more words).
+   - `product_type_match` — whether the query's product type maps to this heading. Weighted highest to prevent material/usage keywords from pulling in adjacent headings (e.g. "stainless steel table knives" must resolve to HS 8211, not the broader HS 7323 even though it shares more words).
    - `function_match` — whether the candidate's primary function matches the query's stated purpose.
    - `attribute_match` — supporting signal for distinguishing attributes (material, form, use). Cannot dominate product type or function.
    - `text_semantic_similarity` — raw text overlap between query and candidate description. Minor signal only.

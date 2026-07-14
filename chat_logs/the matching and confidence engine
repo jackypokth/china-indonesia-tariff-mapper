@@ -1,0 +1,24 @@
+Please revise the matching and confidence engine.
+
+1.  Rename probability to match_confidence everywhere unless a score is empirically calibrated.
+2.  Do not label a result “exact match” solely because the source local/HS code was found.
+3.  Make “exact match” possible only when:
+the source code is an exact verified lookup,
+there is exactly one verified target national code under the shared HS6 OR a verified code-specific crosswalk exists,
+target description compatibility is at least 0.85,
+source references exist.
+4.  Replace fixed base scores with a transparent weighted score: confidence = 0.45 * hs_anchor_strength + 0.35 * description_similarity + 0.10 * national_extension_evidence + 0.10 * source_completeness. Return all four component scores in a reasoning object.
+5.  Apply confidence caps:
+multiple target national extensions without distinguishing detail: max 0.84;
+description-only input: max 0.79;
+vague input or multiple plausible HS6 anchors: max 0.59;
+no verified candidate: max 0.39 and manualReviewRequired=true.
+6.  Make manualReviewRequired true when:
+top two target candidates are within 0.08 confidence,
+key differentiating attributes are absent,
+target national extensions diverge beyond HS6,
+source code is invalid/not found,
+tariff or source information is not verified.
+7.  Ensure tariff rates are only displayed when stored in a verified source row. Otherwise display “Not available in current source data,” never a placeholder numeric rate.
+8.  Return a missing_attributes array, e.g. ["material", "intended use", "technical specification"], explaining what the user should provide to improve the match.
+9.  Keep top 5 results, sorted descending, with a human-readable explanation generated only from the returned reasoning fields.

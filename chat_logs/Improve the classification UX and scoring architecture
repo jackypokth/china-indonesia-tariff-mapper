@@ -1,0 +1,20 @@
+Improve the classification UX and scoring architecture.
+
+Keep one absolute match_confidence per candidate. Do not calculate it purely from rank or normalize it against the other candidates.
+Add candidate_margin = top_1.match_confidence - top_2.match_confidence after sorting.
+Use candidate margin only as an ambiguity/review signal:
+margin >= 0.15 and top score >= 0.85: high separation;
+margin 0.08–0.15: moderate separation;
+margin < 0.08: competing candidates, show national-extension review if relevant.
+Remove per-candidate improvement suggestions from result cards.
+Add a single shared “Improve classification precision” panel only if:
+manual_review_required is true, OR
+top-two margin < 0.08, OR
+national-extension-specific attributes are missing.
+The panel must list only product attributes that distinguish the top candidates, for example material, intended use, dimensions, set/single item, fibre composition, upper/sole material, or technical function.
+Do not show an improvement panel for clear high-separation matches.
+Add hybrid retrieval: exact code/prefix lookup + keyword/BM25 search + embedding similarity. The LLM must choose HS anchors only from retrieved dataset records and return structured JSON.
+Add an optional structured-details form after initial results. Dynamically request only attributes relevant to the inferred product family.
+Maintain a small classification_rules table for 3–5 demo product families. Use these rules to score national-extension specificity and explain the result.
+Continue to keep tariff/source availability separate from match confidence and manual-review logic.
+Add fields: { "candidate_margin": 0.00, "ambiguity_level": "low|medium|high", "required_attributes": [], "missing_attributes": [], "improvement_panel_visible": false }

@@ -454,6 +454,10 @@ function normalizeCodeOnly(raw: string): string {
 
 interface CodeResolution {
   anchor: string | null;
+  /** All matched anchors. Single-element for exact matches; multiple elements
+   * when a short prefix (< 6 digits for hs_code, < full code for local_code)
+   * matches several sub-headings — so the caller can surface all of them. */
+  allMatchingAnchors: string[];
   comparisonEntry: TariffCodeEntry | null;
   /** 1.0 for an exact code match, scaled down for a fuzzy prefix match. */
   anchorCertainty: number;
@@ -464,42 +468,85 @@ interface CodeResolution {
 /** Deterministic exact/prefix code resolution (hs_code / local_code query
  * types) — unrelated to the LLM-driven, attribute-first description-query
  * pipeline below, since a valid code already fully determines product
- * type/function. */
+ * type/function.
+ *
+ * For partial codes (< 6 digits for hs_code, < full code length for
+ * local_code) the resolver returns ALL sub-headings whose anchor or local code
+ * shares that prefix, so the caller can surface every matching line rather
+ * than stopping at a single best-guess anchor. */
 function resolveCode(query: string, queryType: "hs_code" | "local_code", sourceCountry: Country): CodeResolution {
   if (queryType === "hs_code") {
     const digits = normalizeCodeOnly(query);
     if (digits.length >= 6) {
+      // Exact 6+ digit lookup — deterministic.
       const anchor = digits.slice(0, 6);
       const knownEntry = TARIFF_CODE_ENTRIES.find((e) => e.hsAnchor === anchor);
       if (knownEntry) {
-        return { anchor, comparisonEntry: knownEntry, anchorCertainty: 1, sourceResolutionVerified: true, invalidOrNotFound: false };
+        return { anchor, allMatchingAnchors: [anchor], comparisonEntry: knownEntry, anchorCertainty: 1, sourceResolutionVerified: true, invalidOrNotFound: false };
+      }
+    } else if (digits.length >= 2) {
+      // Short heading prefix (2–5 digits): find every known anchor that starts
+      // with these digits (curated entries first, then placeholders).
+      const matchingEntries = TARIFF_CODE_ENTRIES.filter((e) => e.hsAnchor.startsWith(digits));
+      if (matchingEntries.length > 0) {
+        const allMatchingAnchors = [...new Set(matchingEntries.map((e) => e.hsAnchor))];
+        // Certainty scales with how much of the 6-digit anchor was supplied.
+        const anchorCertainty = clamp01(digits.length / 6);
+        return {
+          anchor: allMatchingAnchors[0],
+          allMatchingAnchors,
+          comparisonEntry: matchingEntries[0],
+          anchorCertainty,
+          sourceResolutionVerified: false,
+          invalidOrNotFound: false,
+        };
       }
     }
-    return { anchor: null, comparisonEntry: null, anchorCertainty: 0, sourceResolutionVerified: false, invalidOrNotFound: true };
+    return { anchor: null, allMatchingAnchors: [], comparisonEntry: null, anchorCertainty: 0, sourceResolutionVerified: false, invalidOrNotFound: true };
   }
 
+  // local_code path — search source-country entries by national code.
   const normalizedQuery = normalizeCode(query);
   const sourceEntries = entriesForCountry(sourceCountry);
   const exact = sourceEntries.find((entry) => normalizeCode(entry.code) === normalizedQuery);
   if (exact) {
-    return { anchor: exact.hsAnchor, comparisonEntry: exact, anchorCertainty: 1, sourceResolutionVerified: true, invalidOrNotFound: false };
+    return { anchor: exact.hsAnchor, allMatchingAnchors: [exact.hsAnchor], comparisonEntry: exact, anchorCertainty: 1, sourceResolutionVerified: true, invalidOrNotFound: false };
   }
-  let bestPrefix: TariffCodeEntry | null = null;
+
+  // Prefix match: collect ALL source entries that share at least 4 characters
+  // with the query, not just the single best one.  This ensures a short input
+  // like "7323" surfaces every 7323.xx sub-heading instead of stopping at the
+  // first match.
+  type ScoredEntry = { entry: TariffCodeEntry; len: number };
+  const prefixMatches: ScoredEntry[] = [];
   let bestPrefixLen = 0;
   for (const entry of sourceEntries) {
     const code = normalizeCode(entry.code);
     let len = 0;
     while (len < code.length && len < normalizedQuery.length && code[len] === normalizedQuery[len]) len += 1;
-    if (len > bestPrefixLen && len >= 4) {
-      bestPrefixLen = len;
-      bestPrefix = entry;
+    if (len >= 4) {
+      if (len > bestPrefixLen) bestPrefixLen = len;
+      prefixMatches.push({ entry, len });
     }
   }
-  if (bestPrefix) {
+  if (prefixMatches.length > 0) {
+    // Keep all entries whose prefix length is within 1 of the best match so
+    // that "7323" (4-char match against any 7323xxxxxx code) groups all
+    // same-heading siblings together.
+    const threshold = bestPrefixLen - 1;
+    const kept = prefixMatches.filter((m) => m.len >= threshold);
+    const allMatchingAnchors = [...new Set(kept.map((m) => m.entry.hsAnchor))];
     const ratio = clamp01(bestPrefixLen / normalizedQuery.length);
-    return { anchor: bestPrefix.hsAnchor, comparisonEntry: bestPrefix, anchorCertainty: clamp01(ratio * 0.75), sourceResolutionVerified: false, invalidOrNotFound: false };
+    return {
+      anchor: allMatchingAnchors[0],
+      allMatchingAnchors,
+      comparisonEntry: kept[0].entry,
+      anchorCertainty: clamp01(ratio * 0.75),
+      sourceResolutionVerified: false,
+      invalidOrNotFound: false,
+    };
   }
-  return { anchor: null, comparisonEntry: null, anchorCertainty: 0, sourceResolutionVerified: false, invalidOrNotFound: true };
+  return { anchor: null, allMatchingAnchors: [], comparisonEntry: null, anchorCertainty: 0, sourceResolutionVerified: false, invalidOrNotFound: true };
 }
 
 interface BuiltMatch {
@@ -707,30 +754,38 @@ export async function searchTariffMatches(
       };
     }
 
-    const entries = targetCountryEntries.filter((e) => e.hsAnchor === resolution.anchor);
-    const nationalExtensionSpecificity = entries.length > 1 ? (entries.length === 2 ? 0.5 : 0.35) : 1;
-    siblingLineCountByAnchor.set(resolution.anchor, entries.length);
-    const primaryRule = findRuleForAnchor(resolution.anchor);
-    const comparisonText = resolution.comparisonEntry?.description ?? query;
+    // Loop over every matched anchor (single-element for exact matches,
+    // multiple elements when the user entered a short prefix like "7323").
+    const isExactResolution = resolution.allMatchingAnchors.length === 1 && resolution.sourceResolutionVerified;
+    for (const currentAnchor of resolution.allMatchingAnchors) {
+      const entries = targetCountryEntries.filter((e) => e.hsAnchor === currentAnchor);
+      if (entries.length === 0) continue;
+      const nationalExtensionSpecificity = entries.length > 1 ? (entries.length === 2 ? 0.5 : 0.35) : 1;
+      siblingLineCountByAnchor.set(currentAnchor, entries.length);
+      const primaryRule = findRuleForAnchor(currentAnchor);
+      // Use the entry for this specific anchor as comparison text when available.
+      const anchorEntry = TARIFF_CODE_ENTRIES.find((e) => e.hsAnchor === currentAnchor) ?? resolution.comparisonEntry;
+      const comparisonText = anchorEntry?.description ?? query;
 
-    for (const entry of entries) {
-      const textSemanticSimilarity = clamp01(jaccardSimilarity(tokenize(comparisonText), tokenize(entry.description)));
-      candidateMatches.push(
-        buildMatchForEntry({
-          entry,
-          productTypeMatch: resolution.anchorCertainty,
-          functionMatch: resolution.anchorCertainty,
-          attributeMatchBase: resolution.anchorCertainty,
-          textSemanticSimilarity,
-          nationalExtensionSpecificity,
-          conflicts: [],
-          siblingLineCount: entries.length,
-          sourceResolutionVerified: resolution.sourceResolutionVerified,
-          uniqueTargetLine: entries.length <= 1,
-          primaryRule,
-          queryLower,
-        }),
-      );
+      for (const entry of entries) {
+        const textSemanticSimilarity = clamp01(jaccardSimilarity(tokenize(comparisonText), tokenize(entry.description)));
+        candidateMatches.push(
+          buildMatchForEntry({
+            entry,
+            productTypeMatch: resolution.anchorCertainty,
+            functionMatch: resolution.anchorCertainty,
+            attributeMatchBase: resolution.anchorCertainty,
+            textSemanticSimilarity,
+            nationalExtensionSpecificity,
+            conflicts: [],
+            siblingLineCount: entries.length,
+            sourceResolutionVerified: isExactResolution,
+            uniqueTargetLine: entries.length <= 1,
+            primaryRule,
+            queryLower,
+          }),
+        );
+      }
     }
 
     // Supplemental description-similarity candidates outside the resolved

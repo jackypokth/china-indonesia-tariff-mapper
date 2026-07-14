@@ -168,9 +168,9 @@ The precision panel becomes visible (`improvement_panel_visible = true`) when an
 ### Attribute Selection Logic (`requiredAttributesFor`)
 The function in `tariffMatcher.ts` determines which attributes to surface by:
 1. Fetching the `classification_rules` entry for the top candidate heading.
-2. Comparing the rule's required discriminating attributes against the facts already extracted by `extractProductFacts`.
-3. Using **synonym-aware matching** with **distinct-anchor competition** to determine which attributes are genuinely unresolved. A fact is considered resolved only if a synonym-normalized value matches an expected attribute anchor unambiguously. If two different anchors compete for the same extracted fact, the attribute is treated as unresolved and surfaced.
-4. Returning only the attributes that are both (a) required by the rule and (b) not yet pinned down by the query text or extracted facts.
+2. Comparing the rule's required discriminating attributes against the facts already extracted by `extractProductFacts`. ("material":"stainless","carbon")
+4. Using **synonym-aware matching** with **distinct-anchor competition** to determine which attributes are genuinely unresolved. A fact is considered resolved only if a synonym-normalized value matches an expected attribute anchor unambiguously. If two different anchors compete for the same extracted fact, the attribute is treated as unresolved and surfaced.
+5. Returning only the attributes that are both (a) required by the rule and (b) not yet pinned down by the query text or extracted facts.
 
 This means the panel asks exactly the missing questions — it does not ask for attributes the user already provided, even if they were phrased differently from the canonical terms.
 
